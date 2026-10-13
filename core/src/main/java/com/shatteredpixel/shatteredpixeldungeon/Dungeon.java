@@ -819,6 +819,9 @@ public class Dungeon {
 	}
 	
 	public static void saveAll() throws IOException {
+		//co-op rooms never save: the run is replayed from the action log. Saving here would also
+		//call Actor.fixTime() on this client only (a hidden tab pauses the game) and desync "now".
+		if (com.shatteredpixel.shatteredpixeldungeon.coop.Coop.enabled) return;
 		if (hero != null && (hero.isAlive() || WndResurrect.instance != null)) {
 			
 			Actor.fixTime();

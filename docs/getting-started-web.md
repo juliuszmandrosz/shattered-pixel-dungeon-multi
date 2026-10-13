@@ -89,6 +89,10 @@ depends on the player). `Dungeon.hero` is set by `Actor.process` to the acting h
 deterministic hero for mobs, blobs and buffs, and only goes back to the local hero while the
 actor thread is paused.
 
+Co-op rooms never save: `Dungeon.saveAll()` is a no-op there. Saving calls `Actor.fixTime()`,
+which rebases every actor's time on that client only, and the web backend saves whenever a tab
+is hidden (pause), so a player switching tabs would desync `now` for everyone else.
+
 Not yet in co-op: talents, `WndOptions` prompts opened inside the simulation, non-owner
 clients may still see item windows, death handling beyond "the run continues while someone
 is alive".

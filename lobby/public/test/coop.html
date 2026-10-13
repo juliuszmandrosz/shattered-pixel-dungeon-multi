@@ -38,6 +38,27 @@
   // the log of everything relayed so far; a frame that becomes ready later gets the whole log
   const log = [];
   const ready = {};
+  // ?actions=A|cell|835;B|cell|713;... replays a recorded sequence (one action every 2.5s once
+  // every frame is ready), to reproduce a desync seen in a real room
+  const scripted = (params.get("actions") || "").split(";").filter(Boolean).map((a) => {
+    const [uid, type, payload] = a.split("|");
+    return { uid, type, payload };
+  });
+  let scriptTimer = null;
+  function relay(uid, type, payload) {
+    const msg = { spd: "action", id: String(log.length), uid, seq: log.length, type, payload, at: Date.now() };
+    log.push(msg);
+    for (const id of ids) if (ready[id]) frames[id].contentWindow.postMessage(msg, location.origin);
+    document.getElementById("count").textContent = log.length + " messages";
+  }
+  function maybeStartScript() {
+    if (!scripted.length || scriptTimer || !ids.every((id) => ready[id])) return;
+    scriptTimer = setInterval(() => {
+      const next = scripted.shift();
+      if (!next) { clearInterval(scriptTimer); return; }
+      relay(next.uid, next.type, next.payload);
+    }, 2500);
+  }
   window.addEventListener("message", (e) => {
     const d = e.data;
     if (!d) return;
@@ -46,13 +67,11 @@
     if (d.spd === "ready") {
       ready[uid] = true;
       for (const msg of log) frames[uid].contentWindow.postMessage(msg, location.origin);
+      maybeStartScript();
       return;
     }
     if (d.spd !== "action" || d.uid !== undefined) return; // only fresh actions from a game
-    const msg = { spd: "action", id: String(log.length), uid, seq: log.length, type: d.type, payload: d.payload, at: Date.now() };
-    log.push(msg);
-    for (const id of ids) if (ready[id]) frames[id].contentWindow.postMessage(msg, location.origin);
-    document.getElementById("count").textContent = log.length + " messages";
+    relay(uid, d.type, d.payload);
   });
 </script>
 </body>
