@@ -41,6 +41,20 @@ or serve the output directory with any static server:
 cd web/build/dist/js/webapp && python3 -m http.server 8090
 ```
 
+## Launching straight into a run (lobby integration)
+
+`WebShatteredPixelDungeon` reads the query string of the page (`WebParams`). With a `seed`
+present it skips the welcome, title and hero selection screens:
+
+| Parameter | Meaning |
+| --- | --- |
+| `seed` | dungeon seed as a number (0 .. 26^9-1), applied through the custom seed setting |
+| `heroClass` | `WARRIOR`, `MAGE`, `ROGUE`, `HUNTRESS`, `DUELIST` or `CLERIC` |
+| `room`, `player`, `order` | reserved for the co-op layer, ignored by the game for now |
+
+A reload of the page resumes the run that has the same seed instead of starting over.
+All hero classes are unlocked on the web build regardless of badges.
+
 ## Where saves live
 
 Game files (`game1/game.dat`, rankings, badges, journal) go to the browser's IndexedDB,

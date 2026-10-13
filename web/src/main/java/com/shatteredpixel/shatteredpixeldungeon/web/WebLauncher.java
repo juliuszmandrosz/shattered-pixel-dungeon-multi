@@ -24,7 +24,6 @@ package com.shatteredpixel.shatteredpixeldungeon.web;
 import com.badlogic.gdx.Files;
 import com.github.xpenatan.gdx.teavm.backends.web.WebApplication;
 import com.github.xpenatan.gdx.teavm.backends.web.WebApplicationConfiguration;
-import com.shatteredpixel.shatteredpixeldungeon.ShatteredPixelDungeon;
 import com.watabou.noosa.Game;
 import com.watabou.utils.FileUtils;
 
@@ -57,6 +56,6 @@ public class WebLauncher {
 		config.storagePrefix = "shattered-pixel-dungeon";
 		config.preloadListener = assetLoader -> assetLoader.loadScript("freetype.js");
 
-		new WebApplication(new ShatteredPixelDungeon(new WebPlatformSupport()), config);
+		new WebApplication(new WebShatteredPixelDungeon(new WebPlatformSupport()), config);
 	}
 }
