@@ -22,13 +22,14 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
   const seq = useRef(0);
 
   useEffect(() => {
+    if (!user) return;
     const offRoom = onValue(ref(firebaseDb(), `rooms/${roomId}`), (s) => setRoom((s.val() as Room) ?? null));
     const offPlayers = onValue(ref(firebaseDb(), `roomPlayers/${roomId}`), (s) => setPlayers((s.val() as Record<string, RoomPlayer>) ?? {}));
     return () => {
       offRoom();
       offPlayers();
     };
-  }, [roomId]);
+  }, [roomId, user]);
 
   // actions from the database into the game
   useEffect(() => {

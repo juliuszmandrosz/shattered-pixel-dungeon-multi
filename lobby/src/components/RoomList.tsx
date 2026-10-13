@@ -2,15 +2,19 @@
 
 import { useEffect, useState } from "react";
 import { onValue, orderByChild, query, ref } from "firebase/database";
+import type { User } from "firebase/auth";
 import { firebaseDb } from "@/lib/firebase/client";
 import type { Room } from "@/lib/rooms";
 
 type RoomEntry = Room & { id: string };
 
-export function RoomList({ onJoin }: { onJoin: (room: RoomEntry) => void }) {
+/** `user` gates the subscription: the rules require auth, and a listener attached before
+ *  sign-in completes is cancelled with permission_denied and never retried. */
+export function RoomList({ user, onJoin }: { user: User | null; onJoin: (room: RoomEntry) => void }) {
   const [rooms, setRooms] = useState<RoomEntry[] | null>(null);
 
   useEffect(() => {
+    if (!user) return;
     const roomsQuery = query(ref(firebaseDb(), "rooms"), orderByChild("createdAt"));
     return onValue(roomsQuery, (snapshot) => {
       const list: RoomEntry[] = [];
@@ -19,7 +23,7 @@ export function RoomList({ onJoin }: { onJoin: (room: RoomEntry) => void }) {
       });
       setRooms(list.filter((r) => r.status === "waiting").reverse());
     });
-  }, []);
+  }, [user]);
 
   if (rooms === null) return <p className="text-zinc-500">Loading rooms…</p>;
   if (rooms.length === 0) return <p className="text-zinc-500">No open rooms. Create one.</p>;

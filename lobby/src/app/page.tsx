@@ -69,7 +69,7 @@ export default function Home() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-semibold">Open rooms</h2>
-        <RoomList onJoin={joinRoom} />
+        <RoomList user={user} onJoin={joinRoom} />
       </section>
 
       <section className="flex flex-col gap-3">

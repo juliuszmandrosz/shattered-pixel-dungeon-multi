@@ -19,8 +19,9 @@ export function RoomClient({ params }: { params: Promise<{ id: string }> }) {
   const [presence, setPresence] = useState<Presence>({});
   const [error, setError] = useState<string | null>(null);
 
-  // room card, players, presence
+  // room card, players, presence (listeners need an authenticated user, see RoomList)
   useEffect(() => {
+    if (!user) return;
     const offRoom = onValue(ref(firebaseDb(), `rooms/${roomId}`), (s) => setRoom(s.exists() ? (s.val() as Room) : null));
     const offPlayers = onValue(ref(firebaseDb(), `roomPlayers/${roomId}`), (s) => setPlayers((s.val() as Players) ?? {}));
     const offPresence = onValue(ref(firebaseDb(), `presence/${roomId}`), (s) => setPresence((s.val() as Presence) ?? {}));
@@ -29,7 +30,7 @@ export function RoomClient({ params }: { params: Promise<{ id: string }> }) {
       offPlayers();
       offPresence();
     };
-  }, [roomId]);
+  }, [roomId, user]);
 
   // own presence with server-side cleanup on disconnect
   useEffect(() => {
