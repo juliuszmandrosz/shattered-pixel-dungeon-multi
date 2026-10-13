@@ -935,6 +935,8 @@ public class Hero extends Char {
 	}
 	
 	private void ready() {
+		//hot-seat co-op: the hero waiting for input is the one the player controls and sees
+		Dungeon.localHero = this;
 		if (sprite.looping()) sprite.idle();
 		curAction = null;
 		damageInterrupt = true;
@@ -2235,6 +2237,13 @@ public class Hero extends Char {
 		
 		Actor.fixTime();
 		super.die( cause );
+
+		//in a party the run only ends when nobody is left standing
+		if (Dungeon.heroes.size() > 1 && Dungeon.partyAlive()) {
+			GLog.n( Messages.get(this, "fallen", name()) );
+			Dungeon.heroFell( this );
+			return;
+		}
 		reallyDie( cause );
 	}
 	

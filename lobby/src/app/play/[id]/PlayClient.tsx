@@ -73,6 +73,8 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
     seed: String(room.seed ?? ""),
     order: order.join(","),
     heroClass: players[user.uid]?.heroClass ?? "WARRIOR",
+    // every member's class in player order; the game creates the whole party (hot-seat until the network layer lands)
+    party: order.map((uid) => players[uid]?.heroClass ?? "WARRIOR").join(","),
   });
 
   return (

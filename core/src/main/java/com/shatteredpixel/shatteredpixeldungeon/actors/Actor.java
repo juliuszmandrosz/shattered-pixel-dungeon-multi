@@ -203,6 +203,9 @@ public abstract class Actor implements Bundlable {
 	public static void init() {
 		
 		add( Dungeon.hero );
+		for (com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero h : Dungeon.heroes) {
+			if (h != Dungeon.hero && h.isAlive()) add( h );
+		}
 		
 		for (Mob mob : Dungeon.level.mobs) {
 			add( mob );
@@ -282,6 +285,7 @@ public abstract class Actor implements Bundlable {
 
 				now = current.time;
 				Actor acting = current;
+				Dungeon.focusHero( acting );
 
 				if (acting instanceof Char && ((Char) acting).sprite != null) {
 					// If it's character's turn to act, but its sprite

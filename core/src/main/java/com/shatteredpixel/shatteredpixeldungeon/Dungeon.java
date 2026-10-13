@@ -22,6 +22,8 @@
 package com.shatteredpixel.shatteredpixeldungeon;
 
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Amok;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.AscensionChallenge;
@@ -183,6 +185,14 @@ public class Dungeon {
 	public static float mobsToChampion;
 
 	public static Hero hero;
+
+	//co-op: every hero in the party, in player order. "hero" is the one the current game logic
+	//is about (switched to the acting hero by Actor.process, see focusHero), "localHero" is the
+	//one this client controls and the UI follows.
+	public static ArrayList<Hero> heroes = new ArrayList<>();
+	public static Hero localHero;
+	//extra heroes to create at newGame, set by the launcher from the lobby (first entry is "hero")
+	public static ArrayList<HeroClass> partyClasses = new ArrayList<>();
 	public static Level level;
 
 	public static QuickSlot quickslot = new QuickSlot();
@@ -286,6 +296,59 @@ public class Dungeon {
 		Badges.reset();
 		
 		GamesInProgress.selectedClass.initHero( hero );
+
+		heroes.clear();
+		heroes.add( hero );
+		localHero = hero;
+		//additional party members, created the same way as the first hero
+		for (int i = 1; i < partyClasses.size(); i++) {
+			Hero member = new Hero();
+			member.live();
+			partyClasses.get(i).initHero( member );
+			heroes.add( member );
+		}
+	}
+
+	/** True while at least one hero of the party is alive. */
+	public static boolean partyAlive() {
+		for (Hero h : heroes) {
+			if (h.isAlive()) return true;
+		}
+		return false;
+	}
+
+	/** Called when a hero dies while others live on: the hero leaves the party, the run continues. */
+	public static void heroFell( Hero fallen ) {
+		Actor.remove( fallen );
+		if (hero == fallen) {
+			for (Hero h : heroes) {
+				if (h.isAlive()) { hero = h; break; }
+			}
+		}
+		if (localHero == fallen) localHero = hero;
+	}
+
+	/**
+	 * Points "hero" at the hero the acting actor is about: the hero itself, the target of a
+	 * hero's buff, or for mobs the nearest living hero. Keeps the ~1900 Dungeon.hero reads in
+	 * the game logic meaningful with several heroes in the level.
+	 */
+	public static void focusHero( Actor acting ) {
+		if (heroes.size() <= 1) return;
+		if (acting instanceof Hero) {
+			hero = (Hero) acting;
+		} else if (acting instanceof Buff && ((Buff) acting).target instanceof Hero) {
+			hero = (Hero) ((Buff) acting).target;
+		} else if (acting instanceof Char && level != null) {
+			Hero nearest = null;
+			int best = Integer.MAX_VALUE;
+			for (Hero h : heroes) {
+				if (!h.isAlive()) continue;
+				int d = level.distance( ((Char) acting).pos, h.pos );
+				if (d < best) { best = d; nearest = h; }
+			}
+			if (nearest != null) hero = nearest;
+		}
 	}
 
 	public static boolean isChallenged( int mask ) {
@@ -482,6 +545,19 @@ public class Dungeon {
 		Dungeon.level = level;
 		hero.pos = pos;
 
+		//the party travels together: everyone else lands on a free cell next to the arriving hero
+		for (Hero h : heroes) {
+			if (h == hero || !h.isAlive()) continue;
+			h.pos = -1;
+		}
+		for (Hero h : heroes) {
+			if (h == hero || !h.isAlive()) continue;
+			h.pos = level.pickPartyCell( pos );
+			h.curAction = h.lastAction = null;
+			Light l = h.buff( Light.class );
+			h.viewDistance = l == null ? level.viewDistance : Math.max( Light.DISTANCE, level.viewDistance );
+		}
+
 		if (hero.buff(AscensionChallenge.class) != null){
 			hero.buff(AscensionChallenge.class).onLevelSwitch();
 		}
@@ -605,6 +681,8 @@ public class Dungeon {
 	private static final String SEED		= "seed";
 	private static final String CUSTOM_SEED	= "custom_seed";
 	private static final String SIM_RNG		= "sim_rng";
+	private static final String HEROES		= "heroes";
+	private static final String LOCAL_HERO	= "local_hero";
 	private static final String DAILY	    = "daily";
 	private static final String DAILY_REPLAY= "daily_replay";
 	private static final String LAST_PLAYED = "last_played";
@@ -639,6 +717,8 @@ public class Dungeon {
 			bundle.put( CHALLENGES, challenges );
 			bundle.put( MOBS_TO_CHAMPION, mobsToChampion );
 			bundle.put( HERO, hero );
+			bundle.put( HEROES, heroes );
+			bundle.put( LOCAL_HERO, Math.max( 0, heroes.indexOf( localHero ) ) );
 			bundle.put( DEPTH, depth );
 			bundle.put( BRANCH, branch );
 
@@ -818,6 +898,22 @@ public class Dungeon {
 		
 		hero = null;
 		hero = (Hero)bundle.get( HERO );
+
+		heroes.clear();
+		if (bundle.contains( HEROES )) {
+			for (Bundlable b : bundle.getCollection( HEROES )) {
+				heroes.add( (Hero) b );
+			}
+		}
+		if (heroes.isEmpty()) heroes.add( hero );
+		//"hero" was saved separately and must be the same object as its entry in the party list
+		int focused = -1;
+		for (int i = 0; i < heroes.size(); i++) {
+			if (heroes.get(i).pos == hero.pos && heroes.get(i).heroClass == hero.heroClass && focused == -1) focused = i;
+		}
+		if (focused >= 0) hero = heroes.get( focused ); else heroes.set( 0, hero );
+		int local = bundle.getInt( LOCAL_HERO );
+		localHero = (local >= 0 && local < heroes.size()) ? heroes.get( local ) : hero;
 		
 		depth = bundle.getInt( DEPTH );
 		branch = bundle.getInt( BRANCH );
@@ -912,6 +1008,8 @@ public class Dungeon {
 		observe( dist+1 );
 	}
 	
+	private static boolean[] partyFOV;
+
 	public static void observe( int dist ) {
 
 		if (level == null) {
@@ -920,31 +1018,46 @@ public class Dungeon {
 		
 		level.updateFieldOfView(hero, level.heroFOV);
 
-		int x = hero.pos % level.width();
-		int y = hero.pos / level.width();
-	
-		//left, right, top, bottom
-		int l = Math.max( 0, x - dist );
-		int r = Math.min( x + dist, level.width() - 1 );
-		int t = Math.max( 0, y - dist );
-		int b = Math.min( y + dist, level.height() - 1 );
-	
-		int width = r - l + 1;
-		int height = b - t + 1;
-		
-		int pos = l + t * level.width();
-	
-		for (int i = t; i <= b; i++) {
-			BArray.or( level.visited, level.heroFOV, pos, width, level.visited );
-			pos+=level.width();
+		//the party shares vision: every living hero's field of view is merged into heroFOV
+		if (heroes.size() > 1) {
+			if (partyFOV == null || partyFOV.length != level.length()) partyFOV = new boolean[level.length()];
+			for (Hero h : heroes) {
+				if (h == hero || !h.isAlive()) continue;
+				level.updateFieldOfView(h, partyFOV);
+				BArray.or( level.heroFOV, partyFOV, level.heroFOV );
+			}
 		}
 
-		//always visit adjacent tiles, even if they aren't seen
-		for (int i : PathFinder.NEIGHBOURS9){
-			level.visited[hero.pos+i] = true;
+		int x, y, l, r, t, b, width, height, pos;
+		for (Hero h : heroes) {
+			if (h != hero && !h.isAlive()) continue;
+
+			x = h.pos % level.width();
+			y = h.pos / level.width();
+
+			//left, right, top, bottom
+			l = Math.max( 0, x - dist );
+			r = Math.min( x + dist, level.width() - 1 );
+			t = Math.max( 0, y - dist );
+			b = Math.min( y + dist, level.height() - 1 );
+
+			width = r - l + 1;
+			height = b - t + 1;
+
+			pos = l + t * level.width();
+
+			for (int i = t; i <= b; i++) {
+				BArray.or( level.visited, level.heroFOV, pos, width, level.visited );
+				pos+=level.width();
+			}
+
+			//always visit adjacent tiles, even if they aren't seen
+			for (int i : PathFinder.NEIGHBOURS9){
+				level.visited[h.pos+i] = true;
+			}
+
+			GameScene.updateFog(l, t, width, height);
 		}
-	
-		GameScene.updateFog(l, t, width, height);
 
 		if (hero.buff(MindVision.class) != null || hero.buff(DivineSense.DivineSenseTracker.class) != null){
 			for (Mob m : level.mobs.toArray(new Mob[0])){

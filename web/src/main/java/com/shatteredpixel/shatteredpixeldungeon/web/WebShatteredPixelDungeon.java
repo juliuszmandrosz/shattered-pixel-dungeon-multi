@@ -122,6 +122,25 @@ public class WebShatteredPixelDungeon extends ShatteredPixelDungeon {
 
 		GamesInProgress.selectedClass = heroClass;
 		GamesInProgress.randomizedClass = false;
+
+		//the whole party in player order, e.g. party=WARRIOR,MAGE; the first entry is this client's hero
+		//for now (hot-seat), the lobby passes every member's class and the game creates them all
+		Dungeon.partyClasses.clear();
+		String party = WebParams.get("party", "");
+		if (!party.isEmpty()) {
+			for (String name : party.split(",")) {
+				try {
+					Dungeon.partyClasses.add(HeroClass.valueOf(name.trim()));
+				} catch (IllegalArgumentException e) {
+					Gdx.app.log("web", "unknown hero class in party: " + name);
+				}
+			}
+		}
+		//the first party entry must match this client's hero, which newGame creates from selectedClass
+		if (Dungeon.partyClasses.isEmpty() || Dungeon.partyClasses.get(0) != heroClass) {
+			Dungeon.partyClasses.remove(heroClass);
+			Dungeon.partyClasses.add(0, heroClass);
+		}
 		int slot = GamesInProgress.firstEmpty();
 		GamesInProgress.curSlot = slot == -1 ? 1 : slot;
 

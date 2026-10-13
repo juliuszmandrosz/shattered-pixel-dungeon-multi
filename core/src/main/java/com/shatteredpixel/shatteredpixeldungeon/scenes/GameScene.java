@@ -320,10 +320,19 @@ public class GameScene extends PixelScene {
 		mobs = new Group();
 		add( mobs );
 
-		hero = new HeroSprite();
+		hero = new HeroSprite( Dungeon.hero );
 		hero.place( Dungeon.hero.pos );
 		hero.updateArmor();
 		mobs.add( hero );
+
+		//the rest of the party
+		for (Hero h : Dungeon.heroes) {
+			if (h == Dungeon.hero || !h.isAlive()) continue;
+			HeroSprite s = new HeroSprite( h );
+			s.place( h.pos );
+			s.updateArmor();
+			mobs.add( s );
+		}
 		
 		for (Mob mob : Dungeon.level.mobs) {
 			addMobSprite( mob );
