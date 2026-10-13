@@ -1,6 +1,6 @@
 import { scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { adminDb, errorResponse, HttpError, requireUid } from "@/lib/firebase/admin";
+import { errorResponse, HttpError, requireUid, rtdb } from "@/lib/firebase/admin";
 import type { Room, RoomPlayer } from "@/lib/rooms";
 
 const scryptAsync = promisify(scrypt);
@@ -21,32 +21,29 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const nickname = String(body.nickname ?? "").trim().slice(0, 20) || "Player";
     const password = typeof body.password === "string" ? body.password : "";
 
-    const db = adminDb();
-    const roomSnap = await db.ref(`rooms/${roomId}`).get();
-    if (!roomSnap.exists()) throw new HttpError(404, "room not found");
-    const room = roomSnap.val() as Room;
+    const room = await rtdb.get<Room>(`rooms/${roomId}`);
+    if (!room) throw new HttpError(404, "room not found");
 
-    const existing = await db.ref(`roomPlayers/${roomId}/${uid}`).get();
-    if (existing.exists()) return Response.json({ ok: true, rejoined: true });
+    const existing = await rtdb.get<RoomPlayer>(`roomPlayers/${roomId}/${uid}`);
+    if (existing) return Response.json({ ok: true, rejoined: true });
 
     if (room.status !== "waiting") throw new HttpError(409, "game already started");
 
     if (room.hasPassword) {
-      const secret = (await db.ref(`roomSecrets/${roomId}`).get()).val();
+      const secret = await rtdb.get<{ passwordHash: string }>(`roomSecrets/${roomId}`);
       if (!secret || !(await verifyPassword(password, secret.passwordHash))) {
         throw new HttpError(403, "wrong password");
       }
     }
 
-    const playersSnap = await db.ref(`roomPlayers/${roomId}`).get();
-    const players = (playersSnap.val() ?? {}) as Record<string, RoomPlayer>;
+    const players = (await rtdb.get<Record<string, RoomPlayer>>(`roomPlayers/${roomId}`)) ?? {};
     const count = Object.keys(players).length;
     if (count >= room.maxPlayers) throw new HttpError(409, "room is full");
 
     const order = Math.max(-1, ...Object.values(players).map((p) => p.order)) + 1;
     const player: RoomPlayer = { name: nickname, heroClass: "WARRIOR", ready: false, order, joinedAt: Date.now() };
 
-    await db.ref().update({
+    await rtdb.update("/", {
       [`roomPlayers/${roomId}/${uid}`]: player,
       [`rooms/${roomId}/playerCount`]: count + 1,
     });

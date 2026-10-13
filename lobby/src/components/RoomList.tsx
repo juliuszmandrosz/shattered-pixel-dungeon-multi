@@ -5,6 +5,7 @@ import { onValue, orderByChild, query, ref } from "firebase/database";
 import type { User } from "firebase/auth";
 import { firebaseDb } from "@/lib/firebase/client";
 import type { Room } from "@/lib/rooms";
+import { Button } from "@/components/pd";
 
 type RoomEntry = Room & { id: string };
 
@@ -25,29 +26,38 @@ export function RoomList({ user, onJoin }: { user: User | null; onJoin: (room: R
     });
   }, [user]);
 
-  if (rooms === null) return <p className="text-zinc-500">Loading rooms…</p>;
-  if (rooms.length === 0) return <p className="text-zinc-500">No open rooms. Create one.</p>;
+  if (rooms === null) {
+    return (
+      <p className="pd-muted px-2 py-3">
+        Searching for parties<span className="pd-blink">...</span>
+      </p>
+    );
+  }
+  if (rooms.length === 0) {
+    return <p className="pd-muted px-2 py-3">No party is gathering right now. Found your own below.</p>;
+  }
 
   return (
-    <ul className="divide-y divide-zinc-800 rounded border border-zinc-800">
-      {rooms.map((room) => (
-        <li key={room.id} className="flex items-center justify-between px-3 py-2">
-          <div>
-            <span className="font-medium">{room.name}</span>
-            <span className="ml-2 text-sm text-zinc-500">
-              {room.playerCount}/{room.maxPlayers}
-              {room.hasPassword ? " · locked" : ""}
-            </span>
-          </div>
-          <button
-            className="rounded bg-emerald-700 px-3 py-1 text-sm hover:bg-emerald-600 disabled:opacity-50"
-            disabled={room.playerCount >= room.maxPlayers}
-            onClick={() => onJoin(room)}
-          >
-            Join
-          </button>
-        </li>
-      ))}
+    <ul>
+      {rooms.map((room) => {
+        const full = room.playerCount >= room.maxPlayers;
+        return (
+          <li key={room.id} className="pd-row">
+            <div className="flex-1 min-w-0">
+              <div className="truncate">{room.name}</div>
+              <div className="text-sm">
+                <span className={full ? "pd-negative" : "pd-positive"}>
+                  {room.playerCount}/{room.maxPlayers} heroes
+                </span>
+                {room.hasPassword && <span className="pd-warning"> · password</span>}
+              </div>
+            </div>
+            <Button variant="grey" disabled={full} onClick={() => onJoin(room)}>
+              {full ? "Full" : "Join"}
+            </Button>
+          </li>
+        );
+      })}
     </ul>
   );
 }

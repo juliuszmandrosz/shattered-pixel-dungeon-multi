@@ -5,6 +5,7 @@ import { onChildAdded, onValue, push, ref } from "firebase/database";
 import { useAuth } from "@/hooks/useAuth";
 import { firebaseDb } from "@/lib/firebase/client";
 import type { GameAction, Room, RoomPlayer } from "@/lib/rooms";
+import { HeroSprite } from "@/components/pd";
 
 /**
  * Hosts the TeaVM build of the game in an iframe and bridges it to the room's
@@ -23,8 +24,9 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
 
   useEffect(() => {
     if (!user) return;
-    const offRoom = onValue(ref(firebaseDb(), `rooms/${roomId}`), (s) => setRoom((s.val() as Room) ?? null));
-    const offPlayers = onValue(ref(firebaseDb(), `roomPlayers/${roomId}`), (s) => setPlayers((s.val() as Record<string, RoomPlayer>) ?? {}));
+    const db = firebaseDb();
+    const offRoom = onValue(ref(db, `rooms/${roomId}`), (s) => setRoom((s.val() as Room) ?? null));
+    const offPlayers = onValue(ref(db, `roomPlayers/${roomId}`), (s) => setPlayers((s.val() as Record<string, RoomPlayer>) ?? {}));
     return () => {
       offRoom();
       offPlayers();
@@ -54,7 +56,13 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
     return () => window.removeEventListener("message", onMessage);
   }, [roomId, user]);
 
-  if (!room || !user) return <main className="p-10 text-zinc-500">Loading game…</main>;
+  if (!room || !user) {
+    return (
+      <main className="pd-muted p-10">
+        Descending<span className="pd-blink">...</span>
+      </main>
+    );
+  }
 
   const order = Object.entries(players)
     .sort((a, b) => a[1].order - b[1].order)
@@ -69,9 +77,17 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
 
   return (
     <main className="flex h-screen flex-col bg-black">
-      <div className="flex items-center justify-between px-3 py-1 text-xs text-zinc-500">
-        <span>{room.name} · seed {room.seed}</span>
-        <span>{order.map((uid) => players[uid]?.name).join(", ")}</span>
+      <div className="flex items-center justify-between gap-4 bg-[#1c1b23] px-3 py-1 text-sm">
+        <span className="pd-title">{room.name}</span>
+        <div className="flex items-center gap-3">
+          {order.map((uid) => (
+            <span key={uid} className="flex items-center gap-1">
+              <HeroSprite heroClass={players[uid]?.heroClass ?? "WARRIOR"} className="!h-[15px] !w-[12px]" />
+              <span className={uid === user.uid ? "pd-positive" : ""}>{players[uid]?.name}</span>
+            </span>
+          ))}
+        </div>
+        <span className="pd-muted">seed {room.seed}</span>
       </div>
       <iframe
         ref={frame}

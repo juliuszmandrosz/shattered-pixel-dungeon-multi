@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { authHeader } from "@/lib/firebase/client";
 import { NicknameField } from "@/components/NicknameField";
 import { RoomList } from "@/components/RoomList";
+import { Button, Input, TitleBanner, Window } from "@/components/pd";
 
 export default function Home() {
   const router = useRouter();
@@ -25,8 +26,8 @@ export default function Home() {
         headers: { "Content-Type": "application/json", ...(await authHeader()) },
         body: JSON.stringify({ name: roomName, nickname, password }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "failed to create room");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `failed to create room (${res.status})`);
       router.push(`/rooms/${data.roomId}`);
     } catch (err) {
       setError((err as Error).message);
@@ -37,7 +38,7 @@ export default function Home() {
 
   async function joinRoom(room: { id: string; hasPassword: boolean }) {
     setError(null);
-    const pw = room.hasPassword ? window.prompt("Room password") : "";
+    const pw = room.hasPassword ? window.prompt("This party is guarded. Password?") : "";
     if (room.hasPassword && pw === null) return;
     try {
       const res = await fetch(`/api/rooms/${room.id}/join`, {
@@ -45,8 +46,8 @@ export default function Home() {
         headers: { "Content-Type": "application/json", ...(await authHeader()) },
         body: JSON.stringify({ nickname, password: pw ?? "" }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "failed to join");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? `failed to join (${res.status})`);
       router.push(`/rooms/${room.id}`);
     } catch (err) {
       setError((err as Error).message);
@@ -54,63 +55,66 @@ export default function Home() {
   }
 
   return (
-    <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 py-10">
-      <header>
-        <h1 className="text-3xl font-bold">Shattered Pixel Dungeon Multi</h1>
-        <p className="mt-2 text-zinc-400">
-          Co-op roguelike in the browser. Up to four heroes, one dungeon, turn based.
+    <main className="mx-auto flex max-w-2xl flex-col gap-6 px-4 pb-16 pt-10">
+      <header className="flex flex-col items-center gap-3 text-center">
+        <TitleBanner />
+        <p className="pd-title pd-shadow text-2xl">MULTI</p>
+        <p className="pd-shadow max-w-md">
+          Up to four heroes descend together. One dungeon, one seed, turns like the mobs take them.
         </p>
       </header>
 
-      <section className="flex items-center justify-between">
-        <NicknameField value={nickname} onChange={setNickname} />
-        <span className="text-xs text-zinc-600">{user ? "connected" : "connecting…"}</span>
-      </section>
+      <Window>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <NicknameField value={nickname} onChange={setNickname} />
+          <span className={`text-sm ${user ? "pd-positive" : "pd-muted"}`}>
+            {user ? "● connected" : "○ connecting…"}
+          </span>
+        </div>
+      </Window>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xl font-semibold">Open rooms</h2>
+      <Window title="Parties gathering">
         <RoomList user={user} onJoin={joinRoom} />
-      </section>
+      </Window>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xl font-semibold">Create a room</h2>
-        <form onSubmit={createRoom} className="flex flex-col gap-2 sm:flex-row">
-          <input
-            className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1"
-            placeholder="Room name"
-            value={roomName}
-            required
-            minLength={2}
-            maxLength={32}
-            onChange={(e) => setRoomName(e.target.value)}
-          />
-          <input
-            className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1"
-            placeholder="Password (optional)"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <button
-            className="rounded bg-emerald-700 px-4 py-1 hover:bg-emerald-600 disabled:opacity-50"
-            disabled={busy || !user}
-          >
-            Create
-          </button>
+      <Window title="Found a party">
+        <form onSubmit={createRoom} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Input
+              className="flex-1"
+              placeholder="Party name"
+              value={roomName}
+              required
+              minLength={2}
+              maxLength={32}
+              onChange={(e) => setRoomName(e.target.value)}
+            />
+            <Input
+              className="sm:w-48"
+              placeholder="Password (optional)"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          <div className="flex items-center gap-4">
+            <Button type="submit" disabled={busy || !user}>
+              Enter the Dungeon
+            </Button>
+            {error && <span className="pd-negative text-sm">{error}</span>}
+          </div>
         </form>
-        {error && <p className="text-sm text-red-400">{error}</p>}
-      </section>
+      </Window>
 
-      <footer className="text-xs text-zinc-600">
-        Based on{" "}
+      <footer className="pd-muted pd-shadow text-center text-sm">
+        A GPLv3 fork of{" "}
         <a className="underline" href="https://github.com/00-Evan/shattered-pixel-dungeon">
           Shattered Pixel Dungeon
         </a>{" "}
-        by Evan Debenham, GPLv3.{" "}
+        by Evan Debenham.{" "}
         <a className="underline" href="https://github.com/juliuszmandrosz/shattered-pixel-dungeon-multi">
           Source
         </a>
-        .
       </footer>
     </main>
   );

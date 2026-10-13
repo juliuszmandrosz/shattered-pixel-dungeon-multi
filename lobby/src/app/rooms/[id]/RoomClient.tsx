@@ -6,6 +6,7 @@ import { onDisconnect, onValue, ref, remove, set, update } from "firebase/databa
 import { useAuth } from "@/hooks/useAuth";
 import { authHeader, firebaseDb } from "@/lib/firebase/client";
 import { HERO_CLASSES, type HeroClass, type Room, type RoomPlayer } from "@/lib/rooms";
+import { Button, HERO_LABEL, HeroSprite, Window } from "@/components/pd";
 
 type Players = Record<string, RoomPlayer>;
 type Presence = Record<string, { online: boolean }>;
@@ -22,9 +23,10 @@ export function RoomClient({ params }: { params: Promise<{ id: string }> }) {
   // room card, players, presence (listeners need an authenticated user, see RoomList)
   useEffect(() => {
     if (!user) return;
-    const offRoom = onValue(ref(firebaseDb(), `rooms/${roomId}`), (s) => setRoom(s.exists() ? (s.val() as Room) : null));
-    const offPlayers = onValue(ref(firebaseDb(), `roomPlayers/${roomId}`), (s) => setPlayers((s.val() as Players) ?? {}));
-    const offPresence = onValue(ref(firebaseDb(), `presence/${roomId}`), (s) => setPresence((s.val() as Presence) ?? {}));
+    const db = firebaseDb();
+    const offRoom = onValue(ref(db, `rooms/${roomId}`), (s) => setRoom(s.exists() ? (s.val() as Room) : null));
+    const offPlayers = onValue(ref(db, `roomPlayers/${roomId}`), (s) => setPlayers((s.val() as Players) ?? {}));
+    const offPresence = onValue(ref(db, `presence/${roomId}`), (s) => setPresence((s.val() as Presence) ?? {}));
     return () => {
       offRoom();
       offPlayers();
@@ -65,82 +67,104 @@ export function RoomClient({ params }: { params: Promise<{ id: string }> }) {
   async function startGame() {
     setError(null);
     const res = await fetch(`/api/rooms/${roomId}/start`, { method: "POST", headers: await authHeader() });
-    if (!res.ok) setError((await res.json()).error ?? "failed to start");
+    if (!res.ok) setError((await res.json().catch(() => ({}))).error ?? "failed to start");
   }
 
-  if (room === undefined) return <main className="p-10 text-zinc-500">Loading room…</main>;
-  if (room === null) return <main className="p-10 text-zinc-500">Room not found.</main>;
+  if (room === undefined) {
+    return (
+      <main className="pd-muted p-10">
+        Entering the party<span className="pd-blink">...</span>
+      </main>
+    );
+  }
+  if (room === null) return <main className="pd-muted p-10">This party has disbanded.</main>;
   if (user && !me) {
     return (
-      <main className="p-10 text-zinc-400">
-        You are not in this room. <a className="underline" href="/">Back to the lobby</a>.
+      <main className="p-10">
+        <Window title="Not your party">
+          <p className="mb-4">You have not joined this party.</p>
+          <a href="/">
+            <Button variant="grey">Back to the surface</Button>
+          </a>
+        </Window>
       </main>
     );
   }
 
   const everyoneReady = ordered.length > 0 && ordered.every(([, p]) => p.ready);
+  const slots = Array.from({ length: room.maxPlayers }, (_, i) => ordered[i] ?? null);
 
   return (
-    <main className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-10">
-      <header className="flex items-baseline justify-between">
-        <h1 className="text-2xl font-bold">{room.name}</h1>
-        <span className="text-sm text-zinc-500">
-          {ordered.length}/{room.maxPlayers} players{room.hasPassword ? " · locked" : ""}
-        </span>
+    <main className="mx-auto flex max-w-2xl flex-col gap-6 px-4 pb-16 pt-10">
+      <header className="text-center">
+        <h1 className="pd-title pd-shadow text-2xl">{room.name}</h1>
+        <p className="pd-muted text-sm">
+          {ordered.length}/{room.maxPlayers} heroes{room.hasPassword ? " · guarded by a password" : ""}
+        </p>
       </header>
 
-      <ul className="divide-y divide-zinc-800 rounded border border-zinc-800">
-        {ordered.map(([uid, p]) => (
-          <li key={uid} className="flex items-center justify-between px-3 py-2">
-            <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${presence[uid]?.online ? "bg-emerald-500" : "bg-zinc-600"}`} />
-              <span className="font-medium">{p.name}</span>
-              {uid === room.hostId && <span className="text-xs text-amber-400">host</span>}
-            </div>
-            <div className="flex items-center gap-3 text-sm">
-              <span className="text-zinc-400">{p.heroClass.toLowerCase()}</span>
-              <span className={p.ready ? "text-emerald-400" : "text-zinc-500"}>{p.ready ? "ready" : "not ready"}</span>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <Window title="The party">
+        <ul>
+          {slots.map((slot, i) =>
+            slot ? (
+              <li key={slot[0]} className="pd-row">
+                <HeroSprite heroClass={slot[1].heroClass} />
+                <div className="flex-1 min-w-0">
+                  <div className="truncate">
+                    {slot[1].name}
+                    {slot[0] === room.hostId && <span className="pd-warning text-sm"> · leader</span>}
+                  </div>
+                  <div className="pd-muted text-sm">{HERO_LABEL[slot[1].heroClass]}</div>
+                </div>
+                <div className="text-right text-sm">
+                  <div className={presence[slot[0]]?.online ? "pd-positive" : "pd-muted"}>
+                    {presence[slot[0]]?.online ? "here" : "away"}
+                  </div>
+                  <div className={slot[1].ready ? "pd-positive" : "pd-muted"}>{slot[1].ready ? "ready" : "not ready"}</div>
+                </div>
+              </li>
+            ) : (
+              <li key={`empty-${i}`} className="pd-row pd-muted">
+                <div className="pd-sprite" />
+                <div className="flex-1">an empty seat by the fire</div>
+              </li>
+            ),
+          )}
+        </ul>
+      </Window>
 
       {me && (
-        <section className="flex flex-col gap-3 rounded border border-zinc-800 p-3">
-          <div className="flex flex-wrap gap-2">
+        <Window title="Choose your hero">
+          <div className="mb-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
             {HERO_CLASSES.map((c) => (
-              <button
+              <Button
                 key={c}
+                variant={me.heroClass === c ? "red" : "grey"}
                 onClick={() => setHeroClass(c)}
-                className={`rounded px-3 py-1 text-sm ${
-                  me.heroClass === c ? "bg-emerald-700" : "bg-zinc-800 hover:bg-zinc-700"
-                }`}
+                className="flex-col gap-1 py-2"
               >
-                {c.toLowerCase()}
-              </button>
+                <HeroSprite heroClass={c} />
+                <span className="text-sm">{HERO_LABEL[c]}</span>
+              </Button>
             ))}
           </div>
-          <div className="flex items-center gap-3">
-            <button onClick={toggleReady} className="rounded bg-zinc-800 px-4 py-1 hover:bg-zinc-700">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant={me.ready ? "grey" : "red"} onClick={toggleReady}>
               {me.ready ? "Not ready" : "Ready"}
-            </button>
+            </Button>
             {isHost && (
-              <button
-                onClick={startGame}
-                disabled={!everyoneReady}
-                className="rounded bg-emerald-700 px-4 py-1 hover:bg-emerald-600 disabled:opacity-50"
-              >
-                Start game
-              </button>
+              <Button onClick={startGame} disabled={!everyoneReady}>
+                Descend
+              </Button>
             )}
-            {isHost && !everyoneReady && <span className="text-xs text-zinc-500">waiting for everyone to be ready</span>}
+            {isHost && !everyoneReady && <span className="pd-muted text-sm">waiting for everyone to be ready</span>}
+            {error && <span className="pd-negative text-sm">{error}</span>}
           </div>
-          {error && <p className="text-sm text-red-400">{error}</p>}
-        </section>
+        </Window>
       )}
 
-      <a className="text-sm text-zinc-500 underline" href="/">
-        Back to the lobby
+      <a href="/" className="pd-muted pd-shadow text-center text-sm underline">
+        Back to the surface
       </a>
     </main>
   );
