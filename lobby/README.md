@@ -10,6 +10,7 @@ public/game/           the TeaVM build of the game, copied from ../web/build/dis
 src/app/page.tsx       landing: nickname, open rooms, create room
 src/app/rooms/[id]     waiting room: players, presence, class pick, ready, host starts
 src/app/play/[id]      the game in an iframe + bridge between postMessage and actions/{room}
+                       (seq from a transaction on rooms/{room}/nextSeq, in-order delivery, turn HUD)
 src/app/api/rooms      route handlers (Admin SDK): create, join with password check, start
 src/lib/rooms.ts       database layout and types
 database.rules.json    Realtime Database security rules

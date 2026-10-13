@@ -5,7 +5,8 @@
  * roomSecrets/{roomId}       password hash, never readable by clients
  * roomPlayers/{roomId}/{uid} members in join order, players update their own heroClass/ready
  * presence/{roomId}/{uid}    online flag cleared by onDisconnect
- * actions/{roomId}/{pushId}  append-only stream of game actions, ordered by push id
+ * rooms/{roomId}/nextSeq     counter bumped by a transaction for every action (players may write it)
+ * actions/{roomId}/{seq}     append-only stream of game actions keyed by the zero-padded seq
  */
 
 export const MAX_PLAYERS = 4;
@@ -54,6 +55,10 @@ export function presencePath(roomId: string, uid: string) {
 }
 export function actionsPath(roomId: string) {
   return `actions/${roomId}`;
+}
+/** Zero-padded key so the database orders actions by seq. */
+export function actionKey(seq: number) {
+  return String(seq).padStart(8, "0");
 }
 
 export function isValidRoomName(name: string) {

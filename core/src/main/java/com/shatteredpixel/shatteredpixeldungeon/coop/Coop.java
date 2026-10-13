@@ -78,6 +78,22 @@ public class Coop {
 	}
 	public static Transport transport = null;
 
+	private static int announcedTurn = -1;
+
+	/** Tells the hosting page which hero is waiting for input, for the turn order HUD. */
+	public static void announceTurn( Hero hero ){
+		if (!enabled || transport == null) return;
+		int index = indexOf( hero );
+		if (index == announcedTurn) return;
+		announcedTurn = index;
+		transport.send( "{\"spd\":\"turn\",\"hero\":" + index + "}" );
+	}
+
+	/** Asks the hosting page to leave the game (back to the lobby). */
+	public static void leave(){
+		if (transport != null) transport.send( "{\"spd\":\"leave\"}" );
+	}
+
 	public static class Action {
 		public final String uid;
 		public final long seq;
@@ -101,6 +117,7 @@ public class Coop {
 	public static void reset(){
 		enabled = false;
 		localPlayer = null;
+		announcedTurn = -1;
 		players.clear();
 		synchronized (queues) { queues.clear(); }
 		lastSeq = -1;

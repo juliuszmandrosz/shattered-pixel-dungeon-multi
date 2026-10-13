@@ -2,19 +2,19 @@
   "rules": {
     ".read": false,
     ".write": false,
-
     "rooms": {
       ".read": "auth != null",
       "$roomId": {
-        ".write": false
+        ".write": false,
+        "nextSeq": {
+          ".write": "auth != null && root.child('roomPlayers').child($roomId).child(auth.uid).exists() && root.child('rooms').child($roomId).child('status').val() == 'playing' && newData.isNumber() && ((!data.exists() && newData.val() == 1) || newData.val() == data.val() + 1)"
+        }
       }
     },
-
     "roomSecrets": {
       ".read": false,
       ".write": false
     },
-
     "roomPlayers": {
       "$roomId": {
         ".read": "auth != null",
@@ -24,12 +24,15 @@
           "heroClass": {
             ".validate": "newData.val() == 'WARRIOR' || newData.val() == 'MAGE' || newData.val() == 'ROGUE' || newData.val() == 'HUNTRESS' || newData.val() == 'DUELIST' || newData.val() == 'CLERIC'"
           },
-          "order": { ".validate": "newData.val() == data.val()" },
-          "joinedAt": { ".validate": "newData.val() == data.val()" }
+          "order": {
+            ".validate": "newData.val() == data.val()"
+          },
+          "joinedAt": {
+            ".validate": "newData.val() == data.val()"
+          }
         }
       }
     },
-
     "presence": {
       "$roomId": {
         ".read": "auth != null",
@@ -38,7 +41,6 @@
         }
       }
     },
-
     "actions": {
       "$roomId": {
         ".read": "auth != null && root.child('roomPlayers').child($roomId).child(auth.uid).exists()",

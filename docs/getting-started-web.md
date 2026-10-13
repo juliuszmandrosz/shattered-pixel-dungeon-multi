@@ -64,7 +64,12 @@ visuals, ordered actor and mob collections, id tie-breaks). Only player actions 
 the map, a rest, a search, an item use, a target pick or an item pick is posted to the hosting
 page as `{spd:"action", type, payload}`, the page relays it (Realtime Database in the lobby, an
 in-page relay in `lobby/public/test/coop.html`) and every client receives
-`{spd:"action", uid, seq, type, payload}`. `Coop` queues the action for the hero that belongs
+`{spd:"action", uid, seq, type, payload}`. `seq` must come from one place for everyone: the lobby
+takes it from a transaction on `rooms/{room}/nextSeq` and delivers actions strictly in `seq`
+order (the order in which Realtime Database raises `child_added` differs between clients, a
+client sees its own writes first). The game also posts `{spd:"turn", hero}` whenever a hero
+starts waiting for input (the lobby's turn order HUD) and `{spd:"leave"}` when "Main menu" is
+pressed inside a room. `Coop` queues the action for the hero that belongs
 to `uid` and applies it when that hero's `act()` runs with nothing to do, so all clients apply
 it at the same point of the simulation. Selectors opened by the simulation (wand target, item
 to read a scroll on) are parked, the owner answers them through the queue and every client
