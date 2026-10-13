@@ -50,10 +50,25 @@ present it skips the welcome, title and hero selection screens:
 | --- | --- |
 | `seed` | dungeon seed as a number (0 .. 26^9-1), applied through the custom seed setting |
 | `heroClass` | `WARRIOR`, `MAGE`, `ROGUE`, `HUNTRESS`, `DUELIST` or `CLERIC` |
-| `room`, `player`, `order` | reserved for the co-op layer, ignored by the game for now |
+| `party` | every party member's class in player order, e.g. `WARRIOR,MAGE` |
+| `room`, `player`, `order` | co-op: room id, this player's id, all player ids in order (comma separated). With all three present the game runs in lockstep co-op; the hero at index i of `party` belongs to the player at index i of `order`. Without them the party is played hot-seat from one client. |
 
 A reload of the page resumes the run that has the same seed instead of starting over.
 All hero classes are unlocked on the web build regardless of badges.
+
+## Co-op in one paragraph
+
+Every client runs the full simulation (deterministic: seeded RNG with a separate generator for
+visuals, ordered actor and mob collections, id tie-breaks). Only player actions travel: a tap on
+the map or a rest is posted to the hosting page as `{spd:"action", type, payload}`, the page
+relays it (Realtime Database in the lobby, an in-page relay in `lobby/public/test/coop.html`)
+and every client receives `{spd:"action", uid, seq, type, payload}`. `Coop` queues the action
+for the hero that belongs to `uid` and applies it when that hero's `act()` runs with nothing to
+do, so all clients apply it at the same point of the simulation. Each applied action logs a
+state checksum (`coop: applied seq=… checksum=…`) that must match across clients.
+Not yet in co-op: item use (blocked with a message), talents, selectors and prompts opened
+inside the simulation, resync of a client that fell out of sync, death handling beyond
+"the run continues while someone is alive".
 
 ## Where saves live
 

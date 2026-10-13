@@ -55,6 +55,8 @@ The page owns the Firebase connection; the game only talks to its parent window:
 - page -> game: `postMessage({ spd: "action", id, uid, seq, type, payload, at })` for every
   child of `actions/{roomId}`, in push-id order (also replayed on reconnect)
 
-Room id, player id, seed, player order and hero class are passed in the iframe query string.
-The game does not act on any of this yet; co-op support in the engine is in progress
-(see `../docs` once the architecture document lands).
+Room id, player id, seed, player order, hero class and the party composition are passed in
+the iframe query string (see `../docs/getting-started-web.md`). With room, player and order
+present the game runs in lockstep co-op and every tap becomes an action on `actions/{roomId}`.
+`public/test/coop.html` runs two game instances in one page with an in-page relay, which is
+the quickest way to test the lockstep without two accounts.
