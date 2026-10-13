@@ -26,6 +26,7 @@ import com.shatteredpixel.shatteredpixeldungeon.Badges;
 import com.shatteredpixel.shatteredpixeldungeon.Challenges;
 import com.shatteredpixel.shatteredpixeldungeon.Chrome;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
 import com.shatteredpixel.shatteredpixeldungeon.GamesInProgress;
 import com.shatteredpixel.shatteredpixeldungeon.Rankings;
 import com.shatteredpixel.shatteredpixeldungeon.SPDAction;
@@ -1732,8 +1733,8 @@ public class GameScene extends PixelScene {
 		cellSelector.resetKeyHold();
 		if (Dungeon.hero != null && (Dungeon.hero.curAction != null || Dungeon.hero.resting)) {
 			
-			Dungeon.hero.curAction = null;
-			Dungeon.hero.resting = false;
+			if (!Coop.enabled) Dungeon.hero.curAction = null;
+			if (!Coop.enabled) Dungeon.hero.resting = false;
 			return true;
 			
 		} else {
@@ -1857,6 +1858,13 @@ public class GameScene extends PixelScene {
 	private static final CellSelector.Listener defaultCellListener = new CellSelector.Listener() {
 		@Override
 		public void onSelect( Integer cell ) {
+			//co-op: the tap is sent to every client (including this one) and applied when the
+			//local hero's turn comes, see Coop. Taps while another player's hero waits are
+			//queued for the local hero as well.
+			if (Coop.enabled) {
+				if (cell != null && cell != -1) Coop.submitCell( cell );
+				return;
+			}
 			if (Dungeon.hero.handle( cell )) {
 				Dungeon.hero.next();
 			}

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>co-op harness</title>
+<style>
+  body { margin: 0; background: #000; color: #ccc; font: 12px monospace; }
+  .row { display: flex; height: calc(100vh - 24px); }
+  iframe { flex: 1; border: 0; border-right: 2px solid #333; }
+  #bar { height: 24px; line-height: 24px; padding: 0 8px; background: #111; }
+</style>
+</head>
+<body>
+<div id="bar">co-op harness: two game instances in one page, actions relayed in order like the database would · <span id="count">0 actions</span></div>
+<div class="row">
+  <iframe id="a"></iframe>
+  <iframe id="b"></iframe>
+</div>
+<script>
+  // seed and party are shared, each frame gets its own player id; both see the same order
+  const params = new URLSearchParams(location.search);
+  const seed = params.get("seed") || String(Math.floor(Math.random() * 1e9));
+  const party = params.get("party") || "WARRIOR,MAGE";
+  const room = "harness-" + seed;
+  const frames = { A: document.getElementById("a"), B: document.getElementById("b") };
+  const classes = party.split(",");
+  for (const [id, frame] of Object.entries(frames)) {
+    const q = new URLSearchParams({ room, player: id, order: "A,B", seed, party, heroClass: classes[id === "A" ? 0 : 1] || classes[0] });
+    frame.src = "/game/index.html?" + q.toString();
+  }
+  let seq = 0;
+  window.addEventListener("message", (e) => {
+    const d = e.data;
+    if (!d || d.spd !== "action" || d.uid !== undefined) return; // only fresh actions from a game
+    const uid = e.source === frames.A.contentWindow ? "A" : e.source === frames.B.contentWindow ? "B" : null;
+    if (!uid) return;
+    const msg = { spd: "action", id: String(seq), uid, seq: seq++, type: d.type, payload: d.payload, at: Date.now() };
+    for (const frame of Object.values(frames)) frame.contentWindow.postMessage(msg, location.origin);
+    document.getElementById("count").textContent = seq + " actions";
+  });
+</script>
+</body>
+</html>

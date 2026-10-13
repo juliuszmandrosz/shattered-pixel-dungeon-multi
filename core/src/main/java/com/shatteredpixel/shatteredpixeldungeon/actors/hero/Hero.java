@@ -25,6 +25,7 @@ import com.shatteredpixel.shatteredpixeldungeon.Assets;
 import com.shatteredpixel.shatteredpixeldungeon.Badges;
 import com.shatteredpixel.shatteredpixeldungeon.Bones;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
 import com.shatteredpixel.shatteredpixeldungeon.GamesInProgress;
 import com.shatteredpixel.shatteredpixeldungeon.SPDSettings;
 import com.shatteredpixel.shatteredpixeldungeon.ShatteredPixelDungeon;
@@ -865,6 +866,12 @@ public class Hero extends Char {
 			return false;
 		}
 		
+		//co-op: a hero with nothing to do takes the next action its player sent, if any
+		if (curAction == null && !resting && Coop.enabled) {
+			Coop.Action queued = Coop.poll( this );
+			if (queued != null) Coop.apply( this, queued );
+		}
+
 		boolean actResult;
 		if (curAction == null) {
 			
@@ -936,7 +943,7 @@ public class Hero extends Char {
 	
 	private void ready() {
 		//hot-seat co-op: the hero waiting for input is the one the player controls and sees
-		Dungeon.localHero = this;
+		if (!Coop.enabled) Dungeon.localHero = this;
 		if (sprite.looping()) sprite.idle();
 		curAction = null;
 		damageInterrupt = true;
@@ -1505,6 +1512,11 @@ public class Hero extends Char {
 	}
 	
 	public void rest( boolean fullRest ) {
+		//co-op: resting is an action like any other, it reaches every client through the queue
+		if (Coop.enabled && !Coop.applying) {
+			Coop.submitRest( fullRest );
+			return;
+		}
 		spendAndNextConstant( TIME_TO_REST );
 		if (hasTalent(Talent.HOLD_FAST)){
 			if (heroClass != HeroClass.WARRIOR || buff(BrokenSeal.WarriorShield.class) != null) {

@@ -24,6 +24,7 @@ package com.shatteredpixel.shatteredpixeldungeon.web;
 import com.badlogic.gdx.Files;
 import com.github.xpenatan.gdx.teavm.backends.web.WebApplication;
 import com.github.xpenatan.gdx.teavm.backends.web.WebApplicationConfiguration;
+import com.shatteredpixel.web.WebParams;
 import com.watabou.noosa.Game;
 import com.watabou.utils.FileUtils;
 
@@ -47,7 +48,9 @@ public class WebLauncher {
 		Game.version += "-WEB";
 
 		// Saves and preferences live in the browser's local storage, namespaced by this prefix.
-		FileUtils.setDefaultFileProperties(Files.FileType.Local, "shattered-pixel-dungeon/");
+		String player = WebParams.get("player", "");
+		FileUtils.setDefaultFileProperties(Files.FileType.Local,
+				"shattered-pixel-dungeon/" + (player.isEmpty() ? "" : player + "/"));
 
 		WebApplicationConfiguration config = new WebApplicationConfiguration("canvas");
 		// 0 = fill the browser viewport and follow resizes

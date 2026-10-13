@@ -31,7 +31,11 @@ import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
 import com.shatteredpixel.shatteredpixeldungeon.ui.ActionIndicator;
 import com.shatteredpixel.shatteredpixeldungeon.utils.DungeonSeed;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
+import com.shatteredpixel.web.CoopNet;
 import com.shatteredpixel.web.WebParams;
+
+import java.util.Arrays;
 import com.watabou.utils.PlatformSupport;
 
 /**
@@ -136,10 +140,29 @@ public class WebShatteredPixelDungeon extends ShatteredPixelDungeon {
 				}
 			}
 		}
-		//the first party entry must match this client's hero, which newGame creates from selectedClass
-		if (Dungeon.partyClasses.isEmpty() || Dungeon.partyClasses.get(0) != heroClass) {
-			Dungeon.partyClasses.remove(heroClass);
-			Dungeon.partyClasses.add(0, heroClass);
+		//co-op: the party keeps the lobby's player order on every client, the first entry is
+		//whoever is first in that order, not necessarily this client's hero
+		String room = WebParams.get("room", "");
+		String player = WebParams.get("player", "");
+		String order = WebParams.get("order", "");
+		if (!room.isEmpty() && !player.isEmpty() && order.contains(",")) {
+			Coop.reset();
+			Coop.enabled = true;
+			Coop.localPlayer = player;
+			Coop.players.addAll(Arrays.asList(order.split(",")));
+			Coop.transport = CoopNet::send;
+			CoopNet.listen(Coop::receive);
+			Dungeon.localHeroIndex = Math.max(0, Coop.localIndex());
+			if (Dungeon.partyClasses.isEmpty()) Dungeon.partyClasses.add(heroClass);
+			GamesInProgress.selectedClass = Dungeon.partyClasses.get(0);
+			Gdx.app.log("web", "co-op room " + room + ", player " + player + " is hero #" + Dungeon.localHeroIndex + " of " + Coop.players.size());
+		} else {
+			//hot-seat or single player: this client's hero goes first
+			Dungeon.localHeroIndex = -1;
+			if (Dungeon.partyClasses.isEmpty() || Dungeon.partyClasses.get(0) != heroClass) {
+				Dungeon.partyClasses.remove(heroClass);
+				Dungeon.partyClasses.add(0, heroClass);
+			}
 		}
 		int slot = GamesInProgress.firstEmpty();
 		GamesInProgress.curSlot = slot == -1 ? 1 : slot;

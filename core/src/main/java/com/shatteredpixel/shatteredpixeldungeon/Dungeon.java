@@ -193,6 +193,8 @@ public class Dungeon {
 	public static Hero localHero;
 	//extra heroes to create at newGame, set by the launcher from the lobby (first entry is "hero")
 	public static ArrayList<HeroClass> partyClasses = new ArrayList<>();
+	//index into the party of the hero this client controls (co-op), -1 for hot-seat/single player
+	public static int localHeroIndex = -1;
 	public static Level level;
 
 	public static QuickSlot quickslot = new QuickSlot();
@@ -306,6 +308,9 @@ public class Dungeon {
 			member.live();
 			partyClasses.get(i).initHero( member );
 			heroes.add( member );
+		}
+		if (localHeroIndex >= 0 && localHeroIndex < heroes.size()) {
+			localHero = heroes.get( localHeroIndex );
 		}
 	}
 
