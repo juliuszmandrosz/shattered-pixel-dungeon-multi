@@ -869,9 +869,12 @@ public class Hero extends Char {
 		//co-op: a hero with nothing to do takes the next action its player sent, if any. A new
 		//cell order also replaces a walk in progress (a tap redirects the hero in single player).
 		if (Coop.enabled && !resting
-				&& (curAction == null || (curAction instanceof HeroAction.Move && Coop.nextIsCell( this )))) {
+				&& (curAction == null || (curAction instanceof HeroAction.Move && Coop.redirectAvailable( this )))) {
+			boolean idle = curAction == null;
 			Coop.Action queued = Coop.poll( this );
 			if (queued != null) {
+				//an idle hero waits for the log, so this order is known to every client by now
+				if (idle) Coop.settled( queued );
 				Coop.apply( this, queued );
 				if (curAction == null && !resting) {
 					//an instant action (item, selector answer, search): any time it took was spent

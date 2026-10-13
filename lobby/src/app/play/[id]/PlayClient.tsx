@@ -34,8 +34,11 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
   const [gameReady, setGameReady] = useState(false);
   // bumping this reloads the iframe, which replays the action log from the start
   const [generation, setGeneration] = useState(0);
-  // index (in player order) of the hero waiting for input, from the game
-  const [turnHero, setTurnHero] = useState<number | null>(null);
+  // the hero waiting for input, from the game: index in player order, its order count (epoch,
+  // identical on every client) and whether the party sees an enemy
+  const [turn, setTurn] = useState<{ hero: number; epoch: number; danger: boolean } | null>(null);
+  // seconds the waited-for player has had this turn (drives the skip timer and countdown)
+  const [waited, setWaited] = useState(0);
 
   useEffect(() => {
     if (!user) return;
@@ -86,7 +89,12 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
           setGameReady(true);
           return;
         case "turn":
-          setTurnHero(typeof data.hero === "number" ? data.hero : null);
+          setTurn(
+            typeof data.hero === "number"
+              ? { hero: data.hero, epoch: Number(data.epoch ?? 0), danger: Boolean(data.danger) }
+              : null,
+          );
+          setWaited(0);
           return;
         case "leave":
           router.push("/");
@@ -101,9 +109,34 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
     return () => window.removeEventListener("message", onMessage);
   }, [user, router, sendAction]);
 
+  // skip timer: when the game waits for somebody else, every other client counts and, after
+  // the limit, appends a "skip" order for that hero and turn. The game accepts the first skip
+  // whose epoch still matches and drops the rest, so several clients may send one safely.
+  const myIndex = useRef(-1);
+  useEffect(() => {
+    if (!turn || !gameReady) return;
+    if (turn.hero === myIndex.current) return;
+    const limit = turn.danger ? SKIP_SECONDS_DANGER : SKIP_SECONDS;
+    const started = Date.now();
+    let fired = false;
+    const id = setInterval(() => {
+      const s = Math.floor((Date.now() - started) / 1000);
+      setWaited(s);
+      if (!fired && s >= limit) {
+        fired = true;
+        void sendAction("skip", `${turn.hero}:${turn.epoch}`);
+      }
+    }, 500);
+    return () => clearInterval(id);
+  }, [turn, gameReady, sendAction]);
+
+  function skipNow() {
+    if (turn) void sendAction("skip", `${turn.hero}:${turn.epoch}`);
+  }
+
   function resync() {
     setGameReady(false);
-    setTurnHero(null);
+    setTurn(null);
     setGeneration((g) => g + 1);
   }
 
@@ -118,6 +151,7 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
   const order = Object.entries(players)
     .sort((a, b) => a[1].order - b[1].order)
     .map(([uid]) => uid);
+  myIndex.current = order.indexOf(user.uid);
   const query = new URLSearchParams({
     room: roomId,
     player: user.uid,
@@ -149,13 +183,24 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
           className="h-full w-full border-0"
           allow="autoplay; fullscreen; gamepad"
         />
-        <TurnOrder order={order} players={players} turnHero={turnHero} me={user.uid} />
+        <TurnOrder
+          order={order}
+          players={players}
+          turnHero={turn?.hero ?? null}
+          me={user.uid}
+          waited={waited}
+          limit={turn ? (turn.danger ? SKIP_SECONDS_DANGER : SKIP_SECONDS) : 0}
+          onSkip={skipNow}
+        />
       </div>
     </main>
   );
 }
 
 const ROW = 44;
+// seconds another player may keep everyone waiting before their hero waits a turn
+const SKIP_SECONDS = 20;
+const SKIP_SECONDS_DANGER = 45;
 
 /**
  * Turn order HUD on the left (below the game's own status pane): the hero waiting for input is
@@ -167,11 +212,17 @@ function TurnOrder({
   players,
   turnHero,
   me,
+  waited,
+  limit,
+  onSkip,
 }: {
   order: string[];
   players: Record<string, RoomPlayer>;
   turnHero: number | null;
   me: string;
+  waited: number;
+  limit: number;
+  onSkip: () => void;
 }) {
   const start = turnHero ?? 0;
   const position = new Map<string, number>();
@@ -196,7 +247,17 @@ function TurnOrder({
               <div className={`truncate text-xs ${uid === me ? "pd-positive" : ""}`}>{p?.name ?? "?"}</div>
               <div className="pd-muted text-[10px]">{HERO_LABEL[p?.heroClass ?? "WARRIOR"]}</div>
             </div>
-            {active && <span className={`text-[10px] ${myTurn ? "pd-positive pd-blink" : "pd-title"}`}>{myTurn ? "YOU" : "..."}</span>}
+            {active && myTurn && <span className="pd-positive pd-blink text-[10px]">YOU</span>}
+            {active && !myTurn && (
+              <button
+                type="button"
+                onClick={onSkip}
+                title="Make this hero wait a turn now"
+                className="pd-btn pd-btn-grey pointer-events-auto px-1 text-[10px]"
+              >
+                {limit > 0 ? `${Math.max(0, limit - waited)}s` : "..."}
+              </button>
+            )}
           </div>
         );
       })}

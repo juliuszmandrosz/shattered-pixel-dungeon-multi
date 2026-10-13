@@ -23,6 +23,7 @@ package com.shatteredpixel.shatteredpixeldungeon.coop;
 
 import com.badlogic.gdx.Gdx;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroAction;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.HoldFast;
@@ -82,15 +83,38 @@ public class Coop {
 	}
 	public static Transport transport = null;
 
-	private static int announcedTurn = -1;
+	private static String announcedTurn = null;
 
-	/** Tells the hosting page which hero is waiting for input, for the turn order HUD. */
+	//orders applied per hero, in log order: identical on every client, so a "skip" sent for
+	//(hero, epoch) is accepted or dropped identically everywhere
+	private static final HashMap<Integer, Integer> epochs = new HashMap<>();
+
+	public static int epoch( Hero hero ){
+		Integer e = epochs.get( indexOf( hero ) );
+		return e == null ? 0 : e;
+	}
+
+	/** True when any party member currently sees an enemy (merged party field of view). */
+	public static boolean partySeesEnemy(){
+		if (Dungeon.level == null || Dungeon.level.heroFOV == null) return false;
+		for (Mob mob : Dungeon.level.mobs) {
+			if (mob.alignment == Char.Alignment.ENEMY && mob.pos >= 0 && mob.pos < Dungeon.level.heroFOV.length
+					&& Dungeon.level.heroFOV[mob.pos]) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Tells the hosting page which hero is waiting for input, for the turn order HUD and the skip timer. */
 	public static void announceTurn( Hero hero ){
 		if (!enabled || transport == null) return;
 		int index = indexOf( hero );
-		if (index == announcedTurn) return;
-		announcedTurn = index;
-		transport.send( "{\"spd\":\"turn\",\"hero\":" + index + "}" );
+		String key = index + ":" + epoch( hero );
+		if (key.equals( announcedTurn )) return;
+		announcedTurn = key;
+		transport.send( "{\"spd\":\"turn\",\"hero\":" + index + ",\"epoch\":" + epoch( hero )
+				+ ",\"danger\":" + partySeesEnemy() + "}" );
 	}
 
 	/** Asks the hosting page to leave the game (back to the lobby). */
@@ -121,7 +145,9 @@ public class Coop {
 	public static void reset(){
 		enabled = false;
 		localPlayer = null;
-		announcedTurn = -1;
+		announcedTurn = null;
+		epochs.clear();
+		settledSeq = -1;
 		players.clear();
 		synchronized (queues) { queues.clear(); }
 		lastSeq = -1;
@@ -274,20 +300,26 @@ public class Coop {
 			return;
 		}
 
-		int heroIndex = players.indexOf( uid );
-		if (heroIndex < 0) return;
+		int heroIndex;
+		if ("skip".equals( parts[2] )) {
+			//a skip is sent by another player on behalf of the hero named in the payload
+			int colon = parts[3].indexOf( ':' );
+			try {
+				heroIndex = Integer.parseInt( colon < 0 ? parts[3] : parts[3].substring( 0, colon ) );
+			} catch (NumberFormatException e) {
+				return;
+			}
+		} else {
+			heroIndex = players.indexOf( uid );
+		}
+		if (heroIndex < 0 || heroIndex >= players.size()) return;
 
 		Action action = new Action( uid, seq, parts[2], parts[3] );
 		synchronized (queues) {
 			ArrayDeque<Action> queue = queues.get( heroIndex );
 			if (queue == null) queues.put( heroIndex, queue = new ArrayDeque<>() );
-			//a newer tap replaces a tap that has not been carried out yet (impatient clicking
-			//must not queue up three walks). Every client sees the log in the same order, so
-			//every client drops the same one.
-			Action last = queue.peekLast();
-			if (last != null && "cell".equals( last.type ) && "cell".equals( action.type )) {
-				queue.pollLast();
-			}
+			//no coalescing here: which orders are present at a given moment depends on
+			//delivery timing, so the queue must contain every order and be consumed in log order
 			queue.add( action );
 		}
 
@@ -310,12 +342,26 @@ public class Coop {
 		return hero.ready || (enabled && !hero.resting && hero.curAction instanceof HeroAction.Move);
 	}
 
-	/** True when the next queued action for the hero is a cell order (it may replace a walk). */
-	public static boolean nextIsCell( Hero hero ){
+	//highest seq of an order taken by a hero that had nothing to do (a point where the
+	//simulation waits for the log). Orders are delivered in seq order, so every client that
+	//reaches that simulation point has received everything up to settledSeq.
+	private static long settledSeq = -1;
+
+	/** Called when a hero with nothing to do took an order from its queue. */
+	public static void settled( Action action ){
+		if (action.seq > settledSeq) settledSeq = action.seq;
+	}
+
+	/**
+	 * True when a walking hero may replace its walk with the next queued cell order. Only
+	 * orders no newer than settledSeq qualify: a walking hero does not wait for the log, so
+	 * consulting anything newer would depend on delivery timing and diverge between clients.
+	 */
+	public static boolean redirectAvailable( Hero hero ){
 		synchronized (queues) {
 			ArrayDeque<Action> queue = queues.get( indexOf( hero ) );
 			Action next = queue == null ? null : queue.peek();
-			return next != null && "cell".equals( next.type );
+			return next != null && "cell".equals( next.type ) && next.seq <= settledSeq;
 		}
 	}
 
@@ -377,6 +423,16 @@ public class Coop {
 					applyWait( hero );
 					result = true;
 					break;
+				case "skip": {
+					//"hero:epoch", sent by another player: valid only for the turn they saw
+					int colon = action.payload.indexOf( ':' );
+					int epoch = colon < 0 ? -1 : Integer.parseInt( action.payload.substring( colon + 1 ) );
+					if (epoch == epoch( hero )) {
+						hero.rest( false );
+						result = true;
+					}
+					break;
+				}
 				default:
 					GLog.w( "unknown co-op action: " + action.type );
 			}
@@ -384,6 +440,7 @@ public class Coop {
 			result = false;
 		} finally {
 			applying = false;
+			epochs.put( indexOf( hero ), epoch( hero ) + 1 );
 			long sum = checksum();
 			applied.put( action.seq, sum );
 			Gdx.app.log( "coop", "applied seq=" + action.seq + " " + action.type + " " + action.payload

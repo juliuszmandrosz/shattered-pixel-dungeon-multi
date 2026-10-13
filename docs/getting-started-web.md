@@ -93,6 +93,20 @@ Co-op rooms never save: `Dungeon.saveAll()` is a no-op there. Saving calls `Acto
 which rebases every actor's time on that client only, and the web backend saves whenever a tab
 is hidden (pause), so a player switching tabs would desync `now` for everyone else.
 
+**The log invariant.** A simulation decision may consult the log only at a point where it
+waits for the log. A hero with nothing to do waits for its next order, so when it proceeds,
+every client that reaches that point has received every entry up to that order's seq
+(`Coop.settledSeq`). A walking hero does not wait, so it may only act on orders with
+seq <= settledSeq: a tap redirects a walk one round late, but identically everywhere. Orders
+are never coalesced or reordered on receipt for the same reason.
+
+**Skipping a turn.** When the game waits for a player, the other clients count; after
+20 s (45 s while the party sees an enemy) they append `skip` with payload `hero:epoch`, and a
+button in the HUD does it at once. `epoch` is the number of orders applied for that hero (log
+order, identical everywhere) carried in the `turn` message; the game applies a skip only if the
+epoch still matches, so duplicates and late skips are dropped the same way on every client.
+A skip makes the hero wait one turn (`rest(false)`).
+
 Every UI path that gives the hero an order goes through `Coop` (`handleCell`, `useItem`,
 `selectItem`, `resume`, `waitOrPickup`, rest and search): tap on the map, attack button, loot
 button, resume button, toolbar wait/pick-up, keyboard moves. Calling `hero.handle()` or
