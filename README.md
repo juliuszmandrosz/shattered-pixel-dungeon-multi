@@ -1,41 +1,55 @@
 # Shattered Pixel Dungeon Multi
 
-A browser build of [Shattered Pixel Dungeon](https://github.com/00-Evan/shattered-pixel-dungeon) with up to four-player turn-based co-op. Play it at **https://shattered-pixel-dungeon-multi.vercel.app**.
+A browser build of [Shattered Pixel Dungeon](https://github.com/00-Evan/shattered-pixel-dungeon) with up to four-player turn-based co-op.
 
-This is a fork of 00-Evan's Shattered Pixel Dungeon (v4.0.2), itself based on Watabou's Pixel Dungeon. All game content and the original credits below belong to them; this fork adds:
+**Play:** https://shattered-pixel-dungeon-multi.vercel.app
 
-- `web/` – a TeaVM build of the game that runs in the browser (see `docs/getting-started-web.md`)
-- `core/.../coop/` – deterministic lockstep co-op: every client runs the same simulation, only player actions travel
-- `lobby/` – a Next.js lobby on Vercel with Firebase Realtime Database rooms, passwords and the action relay
+Pick a nickname, found a party (optionally with a password) or join one, choose a hero class in the waiting room, and the host starts the descent. Every player controls their own hero; turns pass the way they do for mobs, so one player's slow move does not block the others for long.
 
-Licensed under GPLv3 like the original, see `LICENSE.txt`.
+## How co-op works
 
----
+Every client runs the full game simulation. Only player actions travel over the network, through a Firebase Realtime Database list per room:
 
-# Shattered Pixel Dungeon
+- the dungeon seed is shared, and the simulation uses a seeded random generator that render-side code (particles, UI) never touches
+- a tap on the map, a rest, a search, an item use, a wand target or an item pick is appended to the room's action log and applied by every client at the same point of the simulation
+- after each applied action the clients exchange a state checksum; a mismatch shows "Out of sync", and **Resync** in the game header reloads the game and replays the action log from the start, which is also how a late joiner catches up
 
-[Shattered Pixel Dungeon](https://shatteredpixel.com/shatteredpd/) is an open-source traditional roguelike dungeon crawler with randomized levels and enemies, and hundreds of items to collect and use. It's based on the [source code of Pixel Dungeon](https://github.com/00-Evan/pixel-dungeon-gradle), by [Watabou](https://watabou.itch.io/).
+Details and the list of engine changes are in [`docs/getting-started-web.md`](docs/getting-started-web.md).
 
-Shattered Pixel Dungeon currently compiles for Android, iOS, and Desktop platforms. You can find official releases of the game on:
+## Repository layout
 
-[![Get it on Google Play](https://shatteredpixel.com/assets/images/badges/gplay.png)](https://play.google.com/store/apps/details?id=com.shatteredpixel.shatteredpixeldungeon)
-[![Download on the App Store](https://shatteredpixel.com/assets/images/badges/appstore.png)](https://apps.apple.com/app/shattered-pixel-dungeon/id1563121109)
-[![Steam](https://shatteredpixel.com/assets/images/badges/steam.png)](https://store.steampowered.com/app/1769170/Shattered_Pixel_Dungeon/)<br>
-[![GOG.com](https://shatteredpixel.com/assets/images/badges/gog.png)](https://www.gog.com/game/shattered_pixel_dungeon)
-[![Itch.io](https://shatteredpixel.com/assets/images/badges/itch.png)](https://shattered-pixel.itch.io/shattered-pixel-dungeon)
-[![Github Releases](https://shatteredpixel.com/assets/images/badges/github.png)](https://github.com/00-Evan/shattered-pixel-dungeon/releases)
+```
+core/, SPD-classes/   the game, forked from upstream 4.0.2 with the co-op and web changes
+core/.../coop/        lockstep action queue, checksums, selector proxies
+web/                  TeaVM (gdx-teavm) build of the game for the browser
+lobby/                Next.js lobby on Vercel: rooms, passwords, waiting room, action relay
+lobby/public/game/    the built game, served by the lobby
+lobby/public/test/    coop.html, a local harness that runs one game instance per player
+docs/                 build guides (web, and the upstream Android, desktop and iOS guides)
+```
 
-If you like this game, please consider [supporting me on Patreon](https://www.patreon.com/ShatteredPixel)!
+## Running it yourself
 
-There is an official blog for this project at [ShatteredPixel.com](https://www.shatteredpixel.com/blog/).
+Game build (needs JDK 17, about 12 GB of RAM for TeaVM):
 
-The game also has a translation project hosted on [Transifex](https://explore.transifex.com/shattered-pixel/shattered-pixel-dungeon/).
+```
+./gradlew :web:gdx_teavm_web_js_build
+cp web/build/dist/js/webapp/app.js lobby/public/game/app.js
+```
 
-Note that **this repository does not accept pull requests!** The code here is provided in hopes that others may find it useful for their own projects, not to allow community contribution. Issue reports of all kinds (bug reports, feature requests, etc.) are welcome.
+Lobby (needs a Firebase project with anonymous Auth and a Realtime Database, see [`lobby/README.md`](lobby/README.md) and `lobby/.env.example`):
 
-If you'd like to work with the code, you can find the following guides in `/docs`:
-- [Compiling for Android.](docs/getting-started-android.md)
-    - **[If you plan to distribute on Google Play please read the end of this guide.](docs/getting-started-android.md#distributing-your-app)**
-- [Compiling for desktop platforms.](docs/getting-started-desktop.md)
-- [Compiling for iOS.](docs/getting-started-ios.md)
-- [Recommended changes for making your own version.](docs/recommended-changes.md)
+```
+cd lobby
+npm install
+npm run dev
+```
+
+The co-op engine can be tried without Firebase: serve `lobby/public` statically and open
+`/test/coop.html?seed=9004&party=WARRIOR,MAGE,ROGUE` to get one game frame per party member with an in-page relay.
+
+## Credits and license
+
+This is a fork of [Shattered Pixel Dungeon](https://shatteredpixel.com/shatteredpd/) by [00-Evan](https://github.com/00-Evan), itself based on [Pixel Dungeon](https://github.com/00-Evan/pixel-dungeon-gradle) by [Watabou](https://watabou.itch.io/). All game content, art, music and design are theirs; if you enjoy the game, consider [supporting Evan on Patreon](https://www.patreon.com/ShatteredPixel) and playing the [official releases](https://github.com/00-Evan/shattered-pixel-dungeon/releases). The web build uses [gdx-teavm](https://github.com/xpenatan/gdx-teavm).
+
+Licensed under the GNU GPLv3, see [`LICENSE.txt`](LICENSE.txt). The source of the version running at the link above is this repository.
