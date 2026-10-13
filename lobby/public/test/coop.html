@@ -11,31 +11,37 @@
 </style>
 </head>
 <body>
-<div id="bar">co-op harness: two game instances in one page, actions relayed in order like the database would · <span id="count">0 actions</span></div>
-<div class="row">
-  <iframe id="a"></iframe>
-  <iframe id="b"></iframe>
-</div>
+<div id="bar">co-op harness: one game instance per player in one page, actions relayed in order like the database would · <span id="count">0 actions</span></div>
+<div class="row" id="row"></div>
 <script>
-  // seed and party are shared, each frame gets its own player id; both see the same order
+  // seed and party are shared, each frame gets its own player id; all see the same order.
+  // ?party=WARRIOR,MAGE,ROGUE gives three players (one frame per class, up to four).
   const params = new URLSearchParams(location.search);
   const seed = params.get("seed") || String(Math.floor(Math.random() * 1e9));
   const party = params.get("party") || "WARRIOR,MAGE";
+  const classes = party.split(",").slice(0, 4);
+  const ids = ["A", "B", "C", "D"].slice(0, classes.length);
   const room = "harness-" + seed;
-  const frames = { A: document.getElementById("a"), B: document.getElementById("b") };
-  const classes = party.split(",");
-  for (const [id, frame] of Object.entries(frames)) {
-    const q = new URLSearchParams({ room, player: id, order: "A,B", seed, party, heroClass: classes[id === "A" ? 0 : 1] || classes[0] });
-    if (params.get("rngtrace")) q.set("rngtrace", "1");
-    q.set("v", String(Date.now())); frame.src = "/game/index.html?" + q.toString();
+  const frames = {};
+  for (const id of ids) {
+    const frame = document.createElement("iframe");
+    frame.id = id.toLowerCase();
+    document.getElementById("row").appendChild(frame);
+    frames[id] = frame;
   }
+  ids.forEach((id, i) => {
+    const q = new URLSearchParams({ room, player: id, order: ids.join(","), seed, party, heroClass: classes[i] });
+    if (params.get("rngtrace")) q.set("rngtrace", "1");
+    q.set("v", String(Date.now()));
+    frames[id].src = "/game/index.html?" + q.toString();
+  });
   // the log of everything relayed so far; a frame that becomes ready later gets the whole log
   const log = [];
-  const ready = { A: false, B: false };
+  const ready = {};
   window.addEventListener("message", (e) => {
     const d = e.data;
     if (!d) return;
-    const uid = e.source === frames.A.contentWindow ? "A" : e.source === frames.B.contentWindow ? "B" : null;
+    const uid = ids.find((id) => e.source === frames[id].contentWindow);
     if (!uid) return;
     if (d.spd === "ready") {
       ready[uid] = true;
@@ -45,7 +51,7 @@
     if (d.spd !== "action" || d.uid !== undefined) return; // only fresh actions from a game
     const msg = { spd: "action", id: String(log.length), uid, seq: log.length, type: d.type, payload: d.payload, at: Date.now() };
     log.push(msg);
-    for (const [id, frame] of Object.entries(frames)) if (ready[id]) frame.contentWindow.postMessage(msg, location.origin);
+    for (const id of ids) if (ready[id]) frames[id].contentWindow.postMessage(msg, location.origin);
     document.getElementById("count").textContent = log.length + " messages";
   });
 </script>
