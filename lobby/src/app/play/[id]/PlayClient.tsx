@@ -158,8 +158,9 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
 const ROW = 44;
 
 /**
- * Turn order HUD on the left: the hero waiting for input is on top, the others follow in the
- * order they will act. When a turn passes, the previous hero slides to the bottom.
+ * Turn order HUD on the left (below the game's own status pane): the hero waiting for input is
+ * on top, the others follow in the order they will act. When a turn passes, the previous hero
+ * slides to the bottom.
  */
 function TurnOrder({
   order,
@@ -177,7 +178,7 @@ function TurnOrder({
   order.forEach((uid, i) => position.set(uid, (i - start + order.length) % order.length));
   const myTurn = turnHero !== null && order[turnHero] === me;
   return (
-    <div className="pointer-events-none absolute top-3 left-3 select-none" style={{ height: order.length * ROW, width: 172 }}>
+    <div className="pointer-events-none absolute left-3 select-none" style={{ top: "28%", height: order.length * ROW, width: 172 }}>
       {order.map((uid) => {
         const p = players[uid];
         const pos = position.get(uid) ?? 0;
