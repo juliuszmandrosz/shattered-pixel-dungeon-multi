@@ -1,3 +1,17 @@
+# Shattered Pixel Dungeon Multi
+
+A browser build of [Shattered Pixel Dungeon](https://github.com/00-Evan/shattered-pixel-dungeon) with up to four-player turn-based co-op. Play it at **https://shattered-pixel-dungeon-multi.vercel.app**.
+
+This is a fork of 00-Evan's Shattered Pixel Dungeon (v4.0.2), itself based on Watabou's Pixel Dungeon. All game content and the original credits below belong to them; this fork adds:
+
+- `web/` – a TeaVM build of the game that runs in the browser (see `docs/getting-started-web.md`)
+- `core/.../coop/` – deterministic lockstep co-op: every client runs the same simulation, only player actions travel
+- `lobby/` – a Next.js lobby on Vercel with Firebase Realtime Database rooms, passwords and the action relay
+
+Licensed under GPLv3 like the original, see `LICENSE.txt`.
+
+---
+
 # Shattered Pixel Dungeon
 
 [Shattered Pixel Dungeon](https://shatteredpixel.com/shatteredpd/) is an open-source traditional roguelike dungeon crawler with randomized levels and enemies, and hundreds of items to collect and use. It's based on the [source code of Pixel Dungeon](https://github.com/00-Evan/pixel-dungeon-gradle), by [Watabou](https://watabou.itch.io/).
