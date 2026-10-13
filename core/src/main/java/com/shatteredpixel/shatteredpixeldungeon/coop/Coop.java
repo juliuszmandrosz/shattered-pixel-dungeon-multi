@@ -23,6 +23,10 @@ package com.shatteredpixel.shatteredpixeldungeon.coop;
 
 import com.badlogic.gdx.Gdx;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroAction;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.HoldFast;
+import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Belongings;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
@@ -153,6 +157,53 @@ public class Coop {
 		submit( "cell", Integer.toString( cell ) );
 	}
 
+	/**
+	 * UI entry point for "the hero should act on this cell" (tap, attack button, loot button,
+	 * keyboard move). In co-op it becomes a queued action for the local hero, otherwise it is
+	 * handled right away like upstream does.
+	 */
+	public static void handleCell( Hero hero, int cell ){
+		if (enabled && !applying) {
+			if (isLocal( hero )) submitCell( cell );
+			return;
+		}
+		if (hero.handle( cell )) hero.next();
+	}
+
+	/** Resume an interrupted path (the resume indicator). */
+	public static void resume( Hero hero ){
+		if (enabled && !applying) {
+			if (isLocal( hero )) submit( "resume", "" );
+			return;
+		}
+		hero.resume();
+	}
+
+	/** The toolbar's wait/pick-up button: pick up what is here, otherwise rest a turn. */
+	public static void waitOrPickup( Hero hero ){
+		if (enabled && !applying) {
+			if (isLocal( hero )) submit( "wait", "" );
+			return;
+		}
+		applyWait( hero );
+	}
+
+	private static void applyWait( Hero hero ){
+		hero.waitOrPickup = true;
+		if ((Dungeon.level.heaps.get( hero.pos ) != null || hero.canSelfTrample()) && hero.handle( hero.pos )) {
+			//trigger hold fast and patient strike here, even if the hero didn't specifically wait
+			if (hero.hasTalent( Talent.HOLD_FAST )) {
+				Buff.affect( hero, HoldFast.class ).pos = hero.pos;
+			}
+			if (hero.hasTalent( Talent.PATIENT_STRIKE )) {
+				Buff.affect( hero, Talent.PatientStrikeTracker.class ).pos = hero.pos;
+			}
+			hero.next();
+		} else {
+			hero.rest( false );
+		}
+	}
+
 	public static void submitTarget( int cell ){
 		submit( "target", Integer.toString( cell ) );
 	}
@@ -230,6 +281,13 @@ public class Coop {
 		synchronized (queues) {
 			ArrayDeque<Action> queue = queues.get( heroIndex );
 			if (queue == null) queues.put( heroIndex, queue = new ArrayDeque<>() );
+			//a newer tap replaces a tap that has not been carried out yet (impatient clicking
+			//must not queue up three walks). Every client sees the log in the same order, so
+			//every client drops the same one.
+			Action last = queue.peekLast();
+			if (last != null && "cell".equals( last.type ) && "cell".equals( action.type )) {
+				queue.pollLast();
+			}
 			queue.add( action );
 		}
 
@@ -239,6 +297,25 @@ public class Coop {
 			if (hero.ready && Actor.processing()) {
 				hero.next();
 			}
+		}
+	}
+
+	/**
+	 * Whether this client's player may give the hero an order right now: the hero waits for
+	 * input, or (co-op) it is walking a path that a new tap may redirect, like a tap does in the
+	 * single player game.
+	 */
+	public static boolean canOrder( Hero hero ){
+		if (hero == null) return false;
+		return hero.ready || (enabled && !hero.resting && hero.curAction instanceof HeroAction.Move);
+	}
+
+	/** True when the next queued action for the hero is a cell order (it may replace a walk). */
+	public static boolean nextIsCell( Hero hero ){
+		synchronized (queues) {
+			ArrayDeque<Action> queue = queues.get( indexOf( hero ) );
+			Action next = queue == null ? null : queue.peek();
+			return next != null && "cell".equals( next.type );
 		}
 	}
 
@@ -292,6 +369,14 @@ public class Coop {
 					hero.search( true );
 					result = true;
 					break;
+				case "resume":
+					hero.resume();
+					result = hero.curAction != null;
+					break;
+				case "wait":
+					applyWait( hero );
+					result = true;
+					break;
 				default:
 					GLog.w( "unknown co-op action: " + action.type );
 			}
@@ -305,7 +390,8 @@ public class Coop {
 					+ " hero=" + indexOf( hero ) + " checksum=" + Long.toHexString( sum ) + " " + checksumDetail() );
 			Long expected = reported.remove( action.seq );
 			if (expected != null && expected != sum) flagDesync( action.seq );
-			submit( "check", action.seq + ":" + Long.toHexString( sum ) );
+			//the detail travels too, so a mismatch can be diagnosed from the room's log alone
+			submit( "check", action.seq + ":" + Long.toHexString( sum ) + "|" + checksumDetail() );
 		}
 		return result;
 	}
@@ -329,7 +415,9 @@ public class Coop {
 			long seq = Long.parseLong( payload.substring( 0, colon ) );
 			//TeaVM has no Long.parseUnsignedLong, parse the hex digits by hand
 			long sum = 0;
-			for (char c : payload.substring( colon + 1 ).toCharArray()) {
+			int end = payload.indexOf( '|' );
+			if (end < 0) end = payload.length();
+			for (char c : payload.substring( colon + 1, end ).toCharArray()) {
 				int digit = Character.digit( c, 16 );
 				if (digit < 0) return;
 				sum = (sum << 4) | digit;

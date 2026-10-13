@@ -93,6 +93,13 @@ Co-op rooms never save: `Dungeon.saveAll()` is a no-op there. Saving calls `Acto
 which rebases every actor's time on that client only, and the web backend saves whenever a tab
 is hidden (pause), so a player switching tabs would desync `now` for everyone else.
 
+Every UI path that gives the hero an order goes through `Coop` (`handleCell`, `useItem`,
+`selectItem`, `resume`, `waitOrPickup`, rest and search): tap on the map, attack button, loot
+button, resume button, toolbar wait/pick-up, keyboard moves. Calling `hero.handle()` or
+mutating `curAction`/`resting` from the UI directly desyncs the clients (the attack button did
+exactly that: a snake died on one client and lived on the other). A tap while the local hero
+walks a path is queued too and replaces the walk, like a tap does in single player.
+
 Not yet in co-op: talents, `WndOptions` prompts opened inside the simulation, non-owner
 clients may still see item windows, death handling beyond "the run continues while someone
 is alive".

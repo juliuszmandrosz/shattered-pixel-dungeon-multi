@@ -252,21 +252,9 @@ public class Toolbar extends Component {
 			@Override
 			protected void onClick() {
 				if (Dungeon.localHero() != null && Dungeon.localHero().ready && !GameScene.cancel()) {
-					Dungeon.localHero().waitOrPickup = true;
-					if ((Dungeon.level.heaps.get(Dungeon.localHero().pos) != null || Dungeon.localHero().canSelfTrample())
-						&& Dungeon.localHero().handle(Dungeon.localHero().pos)){
-						//trigger hold fast and patient strike here, even if the hero didn't specifically wait
-						if (Dungeon.localHero().hasTalent(Talent.HOLD_FAST)){
-							Buff.affect(Dungeon.localHero(), HoldFast.class).pos = Dungeon.localHero().pos;
-						}
-						if (Dungeon.localHero().hasTalent(Talent.PATIENT_STRIKE)){
-							Buff.affect(Dungeon.localHero(), Talent.PatientStrikeTracker.class).pos = Dungeon.localHero().pos;
-						}
-						Dungeon.localHero().next();
-					} else {
-						examining = false;
-						Dungeon.localHero().rest(false);
-					}
+					examining = false;
+					//pick up or rest; in co-op this is one queued action applied by every client
+					Coop.waitOrPickup( Dungeon.localHero() );
 				}
 			}
 

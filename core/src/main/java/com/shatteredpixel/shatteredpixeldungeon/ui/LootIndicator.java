@@ -22,6 +22,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.ui;
 
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
 import com.shatteredpixel.shatteredpixeldungeon.SPDAction;
 import com.shatteredpixel.shatteredpixeldungeon.items.Heap;
 import com.shatteredpixel.shatteredpixeldungeon.items.Item;
@@ -49,8 +50,8 @@ public class LootIndicator extends Tag {
 		slot = new ItemSlot() {
 			protected void onClick() {
 				LootIndicator.this.onClick();
-				if (Dungeon.localHero().ready && Dungeon.localHero().handle(Dungeon.localHero().pos)){
-					Dungeon.localHero().next();
+				if (Dungeon.localHero().ready){
+					Coop.handleCell( Dungeon.localHero(), Dungeon.localHero().pos );
 				}
 
 			}

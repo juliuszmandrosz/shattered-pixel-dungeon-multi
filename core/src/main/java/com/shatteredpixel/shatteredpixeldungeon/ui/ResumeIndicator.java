@@ -22,6 +22,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.ui;
 
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
 import com.shatteredpixel.shatteredpixeldungeon.SPDAction;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
@@ -69,7 +70,7 @@ public class ResumeIndicator extends Tag {
 	protected void onClick() {
 		super.onClick();
 		if (Dungeon.localHero().ready) {
-			Dungeon.localHero().resume();
+			Coop.resume( Dungeon.localHero() );
 		}
 	}
 

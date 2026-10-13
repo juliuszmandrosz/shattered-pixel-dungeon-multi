@@ -866,8 +866,10 @@ public class Hero extends Char {
 			return false;
 		}
 		
-		//co-op: a hero with nothing to do takes the next action its player sent, if any
-		if (curAction == null && !resting && Coop.enabled) {
+		//co-op: a hero with nothing to do takes the next action its player sent, if any. A new
+		//cell order also replaces a walk in progress (a tap redirects the hero in single player).
+		if (Coop.enabled && !resting
+				&& (curAction == null || (curAction instanceof HeroAction.Move && Coop.nextIsCell( this )))) {
 			Coop.Action queued = Coop.poll( this );
 			if (queued != null) {
 				Coop.apply( this, queued );
@@ -1775,6 +1777,8 @@ public class Hero extends Char {
 		}
 
 		Char lastTarget = QuickSlotButton.lastTarget;
+		//co-op: the auto-aim target belongs to this client's hero only
+		if (Coop.enabled && !Coop.isLocal( this )) target = null;
 		if (target != null && (lastTarget == null ||
 							!lastTarget.isAlive() || !lastTarget.isActive() ||
 							lastTarget.alignment == Alignment.ALLY ||

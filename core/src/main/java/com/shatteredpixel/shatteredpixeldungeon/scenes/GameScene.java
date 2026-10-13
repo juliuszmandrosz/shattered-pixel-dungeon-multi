@@ -976,7 +976,7 @@ public class GameScene extends PixelScene {
 
 		}
 
-		cellSelector.enable(Dungeon.localHero().ready);
+		cellSelector.enable(Coop.canOrder( Dungeon.localHero() ));
 
 		if (!toDestroy.isEmpty()) {
 			for (Gizmo g : toDestroy) {
@@ -1673,7 +1673,7 @@ public class GameScene extends PixelScene {
 			}
 		}
 		cellSelector.listener = listener;
-		cellSelector.enabled = Dungeon.localHero().ready;
+		cellSelector.enabled = Coop.canOrder( Dungeon.localHero() );
 		if (scene != null) {
 			scene.prompt(listener.prompt());
 		}

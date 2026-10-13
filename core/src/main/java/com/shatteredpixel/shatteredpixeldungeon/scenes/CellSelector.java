@@ -151,7 +151,7 @@ public class CellSelector extends ScrollArea {
 	}
 	
 	public void select( int cell, int button ) {
-		if (enabled && Dungeon.localHero().ready && !GameScene.interfaceBlockingHero()
+		if (enabled && Coop.canOrder( Dungeon.localHero() ) && !GameScene.interfaceBlockingHero()
 				&& listener != null && cell != -1) {
 
 			switch (button){
@@ -334,7 +334,7 @@ public class CellSelector extends ScrollArea {
 
 			} else if (!directionFromAction(action).isZero()) {
 
-				Dungeon.localHero().resting = false;
+				if (!Coop.enabled) Dungeon.localHero().resting = false;
 				lastCellMoved = -1;
 				if (heldAction1 == SPDAction.NONE){
 					heldAction1 = action;
@@ -347,7 +347,7 @@ public class CellSelector extends ScrollArea {
 				}
 
 				return true;
-			} else if (Dungeon.localHero() != null && Dungeon.localHero().resting){
+			} else if (Dungeon.localHero() != null && Dungeon.localHero().resting && !Coop.enabled){
 				Dungeon.localHero().resting = false;
 				return true;
 			}
@@ -376,7 +376,7 @@ public class CellSelector extends ScrollArea {
 		if (newLeftStick != leftStickAction){
 			if (leftStickAction == SPDAction.NONE){
 				heldDelay = initialDelay();
-				Dungeon.localHero().resting = false;
+				if (!Coop.enabled) Dungeon.localHero().resting = false;
 			} else if (newLeftStick == SPDAction.NONE && heldDelay > 0f){
 				heldDelay = 0f;
 				moveFromActions(leftStickAction);
@@ -418,9 +418,7 @@ public class CellSelector extends ScrollArea {
 
 		if (cell != Dungeon.localHero().pos && cell != lastCellMoved){
 			lastCellMoved = cell;
-			if (Dungeon.localHero().handle( cell )) {
-				Dungeon.localHero().next();
-			}
+			Coop.handleCell( Dungeon.localHero(), cell );
 			return true;
 
 		} else {
