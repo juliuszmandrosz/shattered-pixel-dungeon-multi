@@ -145,7 +145,8 @@ public class WebShatteredPixelDungeon extends ShatteredPixelDungeon {
 		String room = WebParams.get("room", "");
 		String player = WebParams.get("player", "");
 		String order = WebParams.get("order", "");
-		if (!room.isEmpty() && !player.isEmpty() && order.contains(",")) {
+		//a room with a single player still runs through the relay, so the whole path is exercised
+		if (!room.isEmpty() && !player.isEmpty() && !order.isEmpty()) {
 			Coop.reset();
 			Coop.enabled = true;
 			Coop.localPlayer = player;
