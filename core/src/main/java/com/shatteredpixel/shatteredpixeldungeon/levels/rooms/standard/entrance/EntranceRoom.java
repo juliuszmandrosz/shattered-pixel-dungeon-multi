@@ -101,7 +101,12 @@ public class EntranceRoom extends StandardRoom {
 
 	public static void placeEarlyGuidePages(Level level, Room r){
 		//use a separate generator here so meta progression doesn't affect levelgen
-		Random.pushGenerator();
+		//(in co-op it is seeded, every client must place the pages identically)
+		if (com.shatteredpixel.shatteredpixeldungeon.coop.Coop.enabled) {
+			Random.pushGenerator( Dungeon.seedCurDepth() ^ 0x6a09e667L );
+		} else {
+			Random.pushGenerator();
+		}
 
 		//places the first guidebook page on floor 1
 		if (Dungeon.depth == 1 &&

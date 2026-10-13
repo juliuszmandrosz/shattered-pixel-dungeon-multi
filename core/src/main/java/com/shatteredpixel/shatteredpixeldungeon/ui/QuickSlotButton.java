@@ -22,6 +22,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.ui;
 
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
 import com.shatteredpixel.shatteredpixeldungeon.QuickSlot;
 import com.shatteredpixel.shatteredpixeldungeon.SPDAction;
 import com.shatteredpixel.shatteredpixeldungeon.SPDSettings;
@@ -83,7 +84,7 @@ public class QuickSlotButton extends Button {
 		slot = new ItemSlot() {
 			@Override
 			protected void onClick() {
-				if (!Dungeon.hero.isAlive() || !Dungeon.hero.ready){
+				if (!Dungeon.localHero().isAlive() || !Dungeon.localHero().ready){
 					return;
 				}
 				if (targetingSlot == slotNum && lastTarget != null) {
@@ -97,9 +98,9 @@ public class QuickSlotButton extends Button {
 					}
 				} else {
 					Item item = select(slotNum);
-					if (Dungeon.hero.belongings.contains(item) && !GameScene.cancel()) {
+					if (Dungeon.localHero().belongings.contains(item) && !GameScene.cancel()) {
 						GameScene.centerNextWndOnInvPane();
-						item.execute(Dungeon.hero);
+						Coop.useItem(Dungeon.localHero(), item, null);
 						if (item.usesTargeting) {
 							useTargeting();
 						}
@@ -217,7 +218,7 @@ public class QuickSlotButton extends Button {
 	
 	@Override
 	protected void onClick() {
-		if (Dungeon.hero.ready && !GameScene.cancel()) {
+		if (Dungeon.localHero().ready && !GameScene.cancel()) {
 			GameScene.selectItem(itemSelector);
 		}
 	}
@@ -304,7 +305,7 @@ public class QuickSlotButton extends Button {
 	
 	private void enableSlot() {
 		slot.enable(Dungeon.quickslot.isNonePlaceholder( slotNum )
-				&& (!Dungeon.hero.belongings.lostInventory() || Dungeon.quickslot.getItem(slotNum).keptThroughLostInventory()));
+				&& (!Dungeon.localHero().belongings.lostInventory() || Dungeon.quickslot.getItem(slotNum).keptThroughLostInventory()));
 	}
 
 	public void slotMargins( int left, int top, int right, int bottom){
@@ -350,12 +351,12 @@ public class QuickSlotButton extends Button {
 
 	//FIXME: this is currently very expensive, should either optimize ballistica or this, or both
 	public static int autoAim(Char target, Item item){
-		if (Dungeon.hero == null || target == null){
+		if (Dungeon.localHero() == null || target == null){
 			return -1;
 		}
 
 		//first try to directly target
-		if (item.targetingPos(Dungeon.hero, target.pos) == target.pos) {
+		if (item.targetingPos(Dungeon.localHero(), target.pos) == target.pos) {
 			return target.pos;
 		}
 
@@ -363,7 +364,7 @@ public class QuickSlotButton extends Button {
 		PathFinder.buildDistanceMap( target.pos, BArray.not( new boolean[Dungeon.level.length()], null ), 2 );
 		for (int i = 0; i < PathFinder.distance.length; i++) {
 			if (PathFinder.distance[i] < Integer.MAX_VALUE
-					&& item.targetingPos(Dungeon.hero, i) == target.pos)
+					&& item.targetingPos(Dungeon.localHero(), i) == target.pos)
 				return i;
 		}
 

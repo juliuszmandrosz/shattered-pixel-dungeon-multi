@@ -302,15 +302,36 @@ public class Dungeon {
 		heroes.clear();
 		heroes.add( hero );
 		localHero = hero;
-		//additional party members, created the same way as the first hero
+		//additional party members, created the same way as the first hero. Item.collect() and the
+		//quickslot setup in initHero target Dungeon.hero / Dungeon.quickslot, so each member is
+		//focused while its kit is created and the quickslot bar ends up as the local hero's one.
+		QuickSlot firstSlots = quickslot;
+		QuickSlot localSlots = localHeroIndex == 0 ? quickslot : null;
 		for (int i = 1; i < partyClasses.size(); i++) {
 			Hero member = new Hero();
 			member.live();
+			hero = member;
+			quickslot = new QuickSlot();
 			partyClasses.get(i).initHero( member );
 			heroes.add( member );
+			if (i == localHeroIndex) localSlots = quickslot;
 		}
+		hero = heroes.get( 0 );
+		quickslot = localSlots != null ? localSlots : firstSlots;
 		if (localHeroIndex >= 0 && localHeroIndex < heroes.size()) {
 			localHero = heroes.get( localHeroIndex );
+		}
+	}
+
+	/** The hero this client controls, for UI and input. Falls back to "hero" outside co-op. */
+	public static Hero localHero() {
+		return (localHero != null && heroes.size() > 1) ? localHero : hero;
+	}
+
+	/** While the actor thread is paused in co-op, "hero" is the local hero for the render side. */
+	public static void unfocusHero() {
+		if (com.shatteredpixel.shatteredpixeldungeon.coop.Coop.enabled && localHero != null) {
+			hero = localHero;
 		}
 	}
 
@@ -353,6 +374,11 @@ public class Dungeon {
 				if (d < best) { best = d; nearest = h; }
 			}
 			if (nearest != null) hero = nearest;
+		} else {
+			//blobs, mob buffs and other actors: a deterministic choice, never the client's own hero
+			for (Hero h : heroes) {
+				if (h.isAlive()) { hero = h; break; }
+			}
 		}
 	}
 

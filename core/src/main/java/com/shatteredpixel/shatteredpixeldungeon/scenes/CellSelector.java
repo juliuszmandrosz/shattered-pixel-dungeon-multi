@@ -22,6 +22,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.scenes;
 
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
 import com.shatteredpixel.shatteredpixeldungeon.SPDAction;
 import com.shatteredpixel.shatteredpixeldungeon.SPDSettings;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
@@ -89,10 +90,10 @@ public class CellSelector extends ScrollArea {
 			//The extra check prevents large sprites from blocking the player from clicking adjacent tiles
 
 			//hero first
-			if (Dungeon.hero.sprite != null && Dungeon.hero.sprite.overlapsPoint( p.x, p.y )){
-				PointF c = DungeonTilemap.tileCenterToWorld(Dungeon.hero.pos);
+			if (Dungeon.localHero().sprite != null && Dungeon.localHero().sprite.overlapsPoint( p.x, p.y )){
+				PointF c = DungeonTilemap.tileCenterToWorld(Dungeon.localHero().pos);
 				if (Math.abs(p.x - c.x) <= 12 && Math.abs(p.y - c.y) <= 12) {
-					select(Dungeon.hero.pos, event.button);
+					select(Dungeon.localHero().pos, event.button);
 					return;
 				}
 			}
@@ -150,11 +151,16 @@ public class CellSelector extends ScrollArea {
 	}
 	
 	public void select( int cell, int button ) {
-		if (enabled && Dungeon.hero.ready && !GameScene.interfaceBlockingHero()
+		if (enabled && Dungeon.localHero().ready && !GameScene.interfaceBlockingHero()
 				&& listener != null && cell != -1) {
 
 			switch (button){
 				default:
+					//co-op: an item's target is sent as an action and answered by every client
+					if (Coop.enabled && !Coop.applying && listener == Coop.proxiedCellListener) {
+						Coop.submitTarget( cell );
+						break;
+					}
 					listener.onSelect( cell );
 					break;
 				case PointerEvent.RIGHT:
@@ -328,7 +334,7 @@ public class CellSelector extends ScrollArea {
 
 			} else if (!directionFromAction(action).isZero()) {
 
-				Dungeon.hero.resting = false;
+				Dungeon.localHero().resting = false;
 				lastCellMoved = -1;
 				if (heldAction1 == SPDAction.NONE){
 					heldAction1 = action;
@@ -341,8 +347,8 @@ public class CellSelector extends ScrollArea {
 				}
 
 				return true;
-			} else if (Dungeon.hero != null && Dungeon.hero.resting){
-				Dungeon.hero.resting = false;
+			} else if (Dungeon.localHero() != null && Dungeon.localHero().resting){
+				Dungeon.localHero().resting = false;
 				return true;
 			}
 			
@@ -370,7 +376,7 @@ public class CellSelector extends ScrollArea {
 		if (newLeftStick != leftStickAction){
 			if (leftStickAction == SPDAction.NONE){
 				heldDelay = initialDelay();
-				Dungeon.hero.resting = false;
+				Dungeon.localHero().resting = false;
 			} else if (newLeftStick == SPDAction.NONE && heldDelay > 0f){
 				heldDelay = 0f;
 				moveFromActions(leftStickAction);
@@ -384,7 +390,7 @@ public class CellSelector extends ScrollArea {
 
 		if ((heldAction1 == SPDAction.NONE && leftStickAction == SPDAction.NONE)){
 			lastCellMoved = -1;
-		} else if (Dungeon.hero.ready){
+		} else if (Dungeon.localHero().ready){
 			processKeyHold();
 		}
 	}
@@ -393,7 +399,7 @@ public class CellSelector extends ScrollArea {
 	private int lastCellMoved = 0;
 
 	private boolean moveFromActions(GameAction... actions){
-		if (Dungeon.hero == null || !Dungeon.hero.ready){
+		if (Dungeon.localHero() == null || !Dungeon.localHero().ready){
 			return false;
 		}
 
@@ -405,15 +411,15 @@ public class CellSelector extends ScrollArea {
 		for (GameAction action : actions) {
 			direction.offset(directionFromAction(action));
 		}
-		int cell = Dungeon.hero.pos;
+		int cell = Dungeon.localHero().pos;
 		//clamp to adjacent values (-1 to +1)
 		cell += GameMath.gate(-1, direction.x, +1);
 		cell += GameMath.gate(-1, direction.y, +1) * Dungeon.level.width();
 
-		if (cell != Dungeon.hero.pos && cell != lastCellMoved){
+		if (cell != Dungeon.localHero().pos && cell != lastCellMoved){
 			lastCellMoved = cell;
-			if (Dungeon.hero.handle( cell )) {
-				Dungeon.hero.next();
+			if (Dungeon.localHero().handle( cell )) {
+				Dungeon.localHero().next();
 			}
 			return true;
 
@@ -464,17 +470,17 @@ public class CellSelector extends ScrollArea {
 	public void processKeyHold() {
 		//prioritize moving by controller stick over moving via keys
 		if (!directionFromAction(leftStickAction).isZero() && heldDelay < 0) {
-			enabled = Dungeon.hero.ready = true;
+			enabled = Dungeon.localHero().ready = true;
 			Dungeon.observe();
 			if (moveFromActions(leftStickAction)) {
-				Dungeon.hero.ready = false;
+				Dungeon.localHero().ready = false;
 			}
 		} else if (!(directionFromAction(heldAction1).offset(directionFromAction(heldAction2)).isZero())
 				&& heldDelay <= 0){
-			enabled = Dungeon.hero.ready = true;
+			enabled = Dungeon.localHero().ready = true;
 			Dungeon.observe();
 			if (moveFromActions(heldAction1, heldAction2)) {
-				Dungeon.hero.ready = false;
+				Dungeon.localHero().ready = false;
 			}
 		}
 	}

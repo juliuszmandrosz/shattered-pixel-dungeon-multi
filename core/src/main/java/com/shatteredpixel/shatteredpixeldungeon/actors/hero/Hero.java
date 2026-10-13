@@ -869,7 +869,16 @@ public class Hero extends Char {
 		//co-op: a hero with nothing to do takes the next action its player sent, if any
 		if (curAction == null && !resting && Coop.enabled) {
 			Coop.Action queued = Coop.poll( this );
-			if (queued != null) Coop.apply( this, queued );
+			if (queued != null) {
+				Coop.apply( this, queued );
+				if (curAction == null && !resting) {
+					//an instant action (item, selector answer, search): any time it took was spent
+					//inside apply. Stay ready for the next queued action without resetting the
+					//selectors an item may just have opened.
+					ready = true;
+					return false;
+				}
+			}
 		}
 
 		boolean actResult;
@@ -953,7 +962,9 @@ public class Hero extends Char {
 
 		AttackIndicator.updateState();
 		
-		GameScene.ready();
+		//co-op: a remote hero becoming ready must not reset this client's selectors (a parked
+		//target prompt of the local hero, for instance)
+		if (!Coop.enabled || Coop.isLocal( this )) GameScene.ready();
 		//check statistics to see if vault warned?
 		//or just used shared prefs?
 		if (Dungeon.level instanceof VaultLevel
@@ -2509,6 +2520,11 @@ public class Hero extends Char {
 	}
 
 	public boolean search( boolean intentional ) {
+		//co-op: an intentional search is an action, it reaches every client through the queue
+		if (intentional && Coop.enabled && !Coop.applying) {
+			Coop.submitSearch();
+			return false;
+		}
 		
 		if (!isAlive()) return false;
 		

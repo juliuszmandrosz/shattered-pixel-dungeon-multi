@@ -77,6 +77,9 @@ public class InterlevelScene extends PixelScene {
 	private static final float FAST_FADE = 0.50f; //.33 in, .33 steady, .33 out, 1 second total
 	
 	private static float fadeTime;
+
+	/** True while the transition thread builds or loads the next level, see Random.Gate. */
+	public static volatile boolean simulating = false;
 	
 	public enum Mode {
 		DESCEND, ASCEND, CONTINUE, RESURRECT, RETURN, FALL, RESET, NONE
@@ -414,6 +417,8 @@ public class InterlevelScene extends PixelScene {
 			thread = new Thread() {
 				@Override
 				public void run() {
+					//everything this thread does (new game, level creation, loading) is simulation
+					simulating = true;
 					
 					try {
 
@@ -448,6 +453,10 @@ public class InterlevelScene extends PixelScene {
 						error = e;
 						
 					}
+
+					//the render thread draws visuals from here on (story screen, fade), and
+					//how long that takes depends on the player; it must not touch the simulation RNG
+					simulating = false;
 
 					synchronized (thread) {
 						if (phase == Phase.STATIC && error == null) {

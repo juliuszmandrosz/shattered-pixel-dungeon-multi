@@ -252,12 +252,22 @@ public abstract class Actor implements Bundlable {
 	}
 	
 	public static boolean keepActorThreadAlive = true;
+
+	//true while the actor thread is running simulation code. It is cleared around the two points
+	//where the thread blocks, because on the web (green threads) the render thread runs in between
+	//and its particles must not consume simulation randomness. Thread identity is not reliable there.
+	public static volatile boolean simulating = false;
 	
 	public static void process() {
 		
 		boolean doNext;
 		boolean interrupted = false;
+		simulating = true;
+		//captured once: on the web Thread.currentThread() is not stable across green-thread
+		//switches, and the monitor used for wait/notify must be the same object every time
+		final Thread self = Thread.currentThread();
 
+		try {
 		do {
 			
 			current = null;
@@ -285,19 +295,26 @@ public abstract class Actor implements Bundlable {
 
 				now = current.time;
 				Actor acting = current;
-				Dungeon.focusHero( acting );
 
 				if (acting instanceof Char && ((Char) acting).sprite != null) {
 					// If it's character's turn to act, but its sprite
 					// is moving, wait till the movement is over
 					try {
 						synchronized (((Char)acting).sprite) {
-							if (((Char)acting).sprite.isMoving) {
-								((Char) acting).sprite.wait();
+							//timed wait: a lost notify (seen on the web backend) then costs 50ms, not a hang
+							while (((Char)acting).sprite.isMoving) {
+								Dungeon.unfocusHero();
+								simulating = false;
+								((Char) acting).sprite.wait(50);
+								simulating = true;
 							}
 						}
 					} catch (InterruptedException e) {
+						simulating = true;
 						interrupted = true;
+					} catch (IllegalMonitorStateException e) {
+						simulating = true;
+						System.err.println("coop: sprite wait without monitor");
 					}
 				}
 				
@@ -307,6 +324,8 @@ public abstract class Actor implements Bundlable {
 					doNext = false;
 					current = null;
 				} else {
+					//"Dungeon.hero" must be the same on every co-op client while simulation code runs
+					Dungeon.focusHero( acting );
 					doNext = acting.act();
 					if (doNext && (Dungeon.hero == null || !Dungeon.hero.isAlive())) {
 						doNext = false;
@@ -318,7 +337,7 @@ public abstract class Actor implements Bundlable {
 			}
 
 			if (!doNext){
-				synchronized (Thread.currentThread()) {
+				synchronized (self) {
 					
 					interrupted = interrupted || Thread.interrupted();
 					
@@ -328,17 +347,43 @@ public abstract class Actor implements Bundlable {
 					}
 
 					//signals to the gamescene that actor processing is finished for now
-					Thread.currentThread().notify();
-					
 					try {
-						Thread.currentThread().wait();
-					} catch (InterruptedException e) {
-						interrupted = true;
+						self.notify();
+					} catch (IllegalMonitorStateException e) {
+						System.err.println("coop: actor notify without monitor");
 					}
+					
+					//timed wait so a lost notify (web backend) cannot hang the run. The scene only
+					//notifies once current is null (next() was called), so after a timeout we keep
+					//waiting while an actor is still waiting for input: acting again would reset
+					//selectors the actor may have opened.
+					Dungeon.unfocusHero();
+					simulating = false;
+					do {
+						try {
+							self.wait(100);
+						} catch (InterruptedException e) {
+							interrupted = true;
+						} catch (IllegalMonitorStateException e) {
+							System.err.println("coop: actor wait without monitor");
+							try {
+								Thread.sleep(16);
+							} catch (InterruptedException ie) {
+								interrupted = true;
+							}
+						}
+					} while (current != null && !interrupted && keepActorThreadAlive && !Thread.interrupted());
+					simulating = true;
 				}
 			}
 
 		} while (keepActorThreadAlive);
+		} finally {
+			//whatever ends this thread (interrupt, an exception), the render side must not keep
+			//drawing from the simulation generator
+			Dungeon.unfocusHero();
+			simulating = false;
+		}
 	}
 	
 	public static void add( Actor actor ) {

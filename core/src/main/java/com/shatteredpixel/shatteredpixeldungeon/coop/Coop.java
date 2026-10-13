@@ -24,9 +24,15 @@ package com.shatteredpixel.shatteredpixeldungeon.coop;
 import com.badlogic.gdx.Gdx;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Belongings;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
+import com.shatteredpixel.shatteredpixeldungeon.items.Item;
+import com.shatteredpixel.shatteredpixeldungeon.items.bags.Bag;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.CellSelector;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
+import com.shatteredpixel.shatteredpixeldungeon.windows.WndBag;
 import com.watabou.utils.Random;
 
 import java.util.ArrayDeque;
@@ -44,7 +50,12 @@ import java.util.HashMap;
  *
  * Wire format (one message per action, relayed by the page that hosts the game):
  *   outgoing  {"spd":"action","type":T,"payload":P}
- *   incoming  uid TAB seq TAB type TAB payload   (flattened by the JS bridge)
+ *   incoming  uid TAB seq TAB type TAB payload   (flattened by the JS bridge; seq is the
+ *             global delivery index, identical on every client)
+ *
+ * Action types: cell (tap on the map), target (answer to a cell selector opened by an item),
+ * item (path|action), pick (answer to an item selector), rest (1/0), search, check (seq:hash,
+ * not an action: a state fingerprint other clients compare with their own).
  */
 public class Coop {
 
@@ -54,6 +65,13 @@ public class Coop {
 
 	/** Set while a queued action is being applied, so the gated input paths let it through. */
 	public static boolean applying = false;
+
+	/** True once a checksum from another client disagreed with ours. */
+	public static boolean desynced = false;
+
+	/** Selectors opened by an item while an action was applied; answered through the queue. */
+	public static CellSelector.Listener proxiedCellListener = null;
+	public static WndBag.ItemSelector proxiedItemSelector = null;
 
 	public interface Transport {
 		void send( String json );
@@ -76,6 +94,9 @@ public class Coop {
 
 	private static final HashMap<Integer, ArrayDeque<Action>> queues = new HashMap<>();
 	private static long lastSeq = -1;
+	//checksums of our applied actions, and the ones other clients reported, by seq
+	private static final HashMap<Long, Long> applied = new HashMap<>();
+	private static final HashMap<Long, Long> reported = new HashMap<>();
 
 	public static void reset(){
 		enabled = false;
@@ -83,6 +104,12 @@ public class Coop {
 		players.clear();
 		synchronized (queues) { queues.clear(); }
 		lastSeq = -1;
+		applied.clear();
+		reported.clear();
+		desynced = false;
+		applying = false;
+		proxiedCellListener = null;
+		proxiedItemSelector = null;
 	}
 
 	public static int localIndex(){
@@ -109,8 +136,49 @@ public class Coop {
 		submit( "cell", Integer.toString( cell ) );
 	}
 
+	public static void submitTarget( int cell ){
+		submit( "target", Integer.toString( cell ) );
+	}
+
 	public static void submitRest( boolean full ){
 		submit( "rest", full ? "1" : "0" );
+	}
+
+	public static void submitSearch(){
+		submit( "search", "" );
+	}
+
+	public static void submitItem( Hero hero, Item item, String action ){
+		String path = itemPath( hero, item );
+		if (path == null) {
+			GLog.w( "That item cannot be used in co-op." );
+			return;
+		}
+		submit( "item", path + "|" + action );
+	}
+
+	/**
+	 * UI entry point for using an item (quickslot, inventory, item window). In co-op the use is
+	 * sent as an action and applied on the owner's turn by every client; otherwise it executes.
+	 * Gating here rather than in Item.execute matters: subclasses such as Wand keep acting after
+	 * super.execute returns, and the game itself calls execute during the simulation.
+	 */
+	public static void useItem( Hero hero, Item item, String action ){
+		if (enabled && !applying) {
+			submitItem( hero, item, action == null ? item.defaultAction() : action );
+			return;
+		}
+		if (action == null) item.execute( hero ); else item.execute( hero, action );
+	}
+
+	/** Item selection by the owner: sent instead of answering the selector directly. */
+	public static void selectItem( WndBag.ItemSelector selector, Item item ){
+		if (enabled && !applying && selector == proxiedItemSelector) {
+			String path = itemPath( Dungeon.localHero(), item );
+			if (path != null) submit( "pick", path );
+			return;
+		}
+		selector.onSelect( item );
 	}
 
 	public static void submit( String type, String payload ){
@@ -132,6 +200,11 @@ public class Coop {
 		try { seq = Long.parseLong( parts[1] ); } catch (NumberFormatException e) { return; }
 		if (seq <= lastSeq) return; //duplicate delivery
 		lastSeq = seq;
+
+		if ("check".equals( parts[2] )) {
+			if (!uid.equals( localPlayer )) compareChecksum( parts[3] );
+			return;
+		}
 
 		int heroIndex = players.indexOf( uid );
 		if (heroIndex < 0) return;
@@ -163,24 +236,170 @@ public class Coop {
 	/** Turns a queued action into hero state, exactly like local input would. */
 	public static boolean apply( Hero hero, Action action ){
 		applying = true;
+		boolean result = false;
 		try {
 			switch (action.type) {
 				case "cell":
-					return hero.handle( Integer.parseInt( action.payload ) );
+					result = hero.handle( Integer.parseInt( action.payload ) );
+					break;
+				case "target":
+					result = answerCell( Integer.parseInt( action.payload ) );
+					break;
+				case "item": {
+					int bar = action.payload.lastIndexOf( '|' );
+					if (bar > 0) {
+						Item item = resolveItem( hero, action.payload.substring( 0, bar ) );
+						if (item != null) {
+							item.execute( hero, action.payload.substring( bar + 1 ) );
+							result = true;
+						} else {
+							GLog.w( "co-op: item not found for " + action.payload );
+						}
+					}
+					break;
+				}
+				case "pick": {
+					WndBag.ItemSelector selector = proxiedItemSelector;
+					proxiedItemSelector = null;
+					if (selector != null) {
+						selector.onSelect( resolveItem( hero, action.payload ) );
+						result = true;
+					}
+					break;
+				}
 				case "rest":
 					hero.rest( "1".equals( action.payload ) );
-					return true;
+					result = true;
+					break;
+				case "search":
+					hero.search( true );
+					result = true;
+					break;
 				default:
 					GLog.w( "unknown co-op action: " + action.type );
-					return false;
 			}
 		} catch (NumberFormatException e) {
-			return false;
+			result = false;
 		} finally {
-			Gdx.app.log( "coop", "applied seq=" + action.seq + " " + action.type + " " + action.payload
-					+ " hero=" + indexOf( hero ) + " checksum=" + Long.toHexString( checksum() ) );
 			applying = false;
+			long sum = checksum();
+			applied.put( action.seq, sum );
+			Gdx.app.log( "coop", "applied seq=" + action.seq + " " + action.type + " " + action.payload
+					+ " hero=" + indexOf( hero ) + " checksum=" + Long.toHexString( sum ) + " " + checksumDetail() );
+			Long expected = reported.remove( action.seq );
+			if (expected != null && expected != sum) flagDesync( action.seq );
+			submit( "check", action.seq + ":" + Long.toHexString( sum ) );
 		}
+		return result;
+	}
+
+	private static boolean answerCell( int cell ){
+		CellSelector.Listener listener = proxiedCellListener;
+		proxiedCellListener = null;
+		if (listener == null) {
+			GLog.w( "co-op: no target was being chosen" );
+			return false;
+		}
+		GameScene.ready();
+		listener.onSelect( cell );
+		return true;
+	}
+
+	private static void compareChecksum( String payload ){
+		int colon = payload.indexOf( ':' );
+		if (colon < 0) return;
+		try {
+			long seq = Long.parseLong( payload.substring( 0, colon ) );
+			//TeaVM has no Long.parseUnsignedLong, parse the hex digits by hand
+			long sum = 0;
+			for (char c : payload.substring( colon + 1 ).toCharArray()) {
+				int digit = Character.digit( c, 16 );
+				if (digit < 0) return;
+				sum = (sum << 4) | digit;
+			}
+			Long ours = applied.get( seq );
+			if (ours == null) {
+				reported.put( seq, sum );
+			} else if (ours != sum) {
+				flagDesync( seq );
+			}
+		} catch (NumberFormatException e) {
+			//ignore malformed checks
+		}
+	}
+
+	private static void flagDesync( long seq ){
+		if (desynced) return;
+		desynced = true;
+		Gdx.app.error( "coop", "desync detected at seq " + seq );
+		GLog.n( "Out of sync with the other players (action " + seq + "). Reload the page to catch up." );
+	}
+
+	// ---- item paths: a stable address of an item inside a hero's belongings ----
+
+	public static String itemPath( Hero hero, Item item ){
+		Belongings b = hero.belongings;
+		if (item == b.weapon) return "w";
+		if (item == b.armor) return "a";
+		if (item == b.artifact) return "f";
+		if (item == b.misc) return "m";
+		if (item == b.ring) return "r";
+		if (item == b.secondWep) return "s";
+		for (int i = 0; i < b.backpack.items.size(); i++) {
+			Item it = b.backpack.items.get( i );
+			if (it == item) return "b:" + i;
+			if (it instanceof Bag) {
+				ArrayList<Item> inner = ((Bag) it).items;
+				for (int j = 0; j < inner.size(); j++) {
+					if (inner.get( j ) == item) return "b:" + i + ":" + j;
+				}
+			}
+		}
+		return null;
+	}
+
+	public static Item resolveItem( Hero hero, String path ){
+		Belongings b = hero.belongings;
+		switch (path) {
+			case "w": return b.weapon;
+			case "a": return b.armor;
+			case "f": return b.artifact;
+			case "m": return b.misc;
+			case "r": return b.ring;
+			case "s": return b.secondWep;
+		}
+		if (!path.startsWith( "b:" )) return null;
+		String[] idx = path.substring( 2 ).split( ":" );
+		try {
+			int i = Integer.parseInt( idx[0] );
+			if (i < 0 || i >= b.backpack.items.size()) return null;
+			Item it = b.backpack.items.get( i );
+			if (idx.length == 1) return it;
+			int j = Integer.parseInt( idx[1] );
+			if (!(it instanceof Bag) || j < 0 || j >= ((Bag) it).items.size()) return null;
+			return ((Bag) it).items.get( j );
+		} catch (NumberFormatException e) {
+			return null;
+		}
+	}
+
+	/** The checksum's ingredients, for finding out what diverged. */
+	public static String checksumDetail(){
+		StringBuilder b = new StringBuilder();
+		b.append( "now=" ).append( Actor.now() );
+		b.append( " rng=" ).append( Long.toHexString( Random.simulationState() ) );
+		b.append( " depth=" ).append( Dungeon.depth );
+		for (Hero hero : Dungeon.heroes) {
+			b.append( " h[" ).append( hero.pos ).append( "," ).append( hero.HP ).append( "," )
+					.append( hero.belongings.backpack.items.size() ).append( "," ).append( hero.cooldown() ).append( "]" );
+		}
+		if (Dungeon.level != null) {
+			b.append( " mobs=" );
+			for (Mob mob : Dungeon.level.mobs) b.append( mob.pos ).append( ":" ).append( mob.HP ).append( "," );
+			b.append( " heaps=" ).append( Dungeon.level.heaps.size );
+			b.append( " fov=" ).append( Integer.toHexString( Arrays.hashCode( Dungeon.level.heroFOV ) ) );
+		}
+		return b.toString();
 	}
 
 	/** Fingerprint of the simulation state; identical on every client while they are in sync. */
@@ -192,6 +411,7 @@ public class Coop {
 		for (Hero hero : Dungeon.heroes) {
 			h = 31 * h + hero.pos;
 			h = 31 * h + hero.HP;
+			h = 31 * h + hero.belongings.backpack.items.size();
 			h = 31 * h + Float.floatToIntBits( hero.cooldown() );
 		}
 		if (Dungeon.level != null) {
@@ -199,6 +419,7 @@ public class Coop {
 				h = 31 * h + mob.pos;
 				h = 31 * h + mob.HP;
 			}
+			h = 31 * h + Dungeon.level.heaps.size;
 			h = 31 * h + Arrays.hashCode( Dungeon.level.heroFOV );
 		}
 		return h;

@@ -27,7 +27,9 @@ import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
 import com.shatteredpixel.shatteredpixeldungeon.GamesInProgress;
 import com.shatteredpixel.shatteredpixeldungeon.SPDSettings;
 import com.shatteredpixel.shatteredpixeldungeon.ShatteredPixelDungeon;
+import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroClass;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
 import com.shatteredpixel.shatteredpixeldungeon.ui.ActionIndicator;
 import com.shatteredpixel.shatteredpixeldungeon.utils.DungeonSeed;
@@ -36,7 +38,10 @@ import com.shatteredpixel.web.CoopNet;
 import com.shatteredpixel.web.WebParams;
 
 import java.util.Arrays;
+import com.watabou.noosa.Game;
 import com.watabou.utils.PlatformSupport;
+
+import java.io.IOException;
 
 /**
  * Browser variant of the game. When the lobby opens it with room parameters in the URL
@@ -58,6 +63,14 @@ public class WebShatteredPixelDungeon extends ShatteredPixelDungeon {
 			unlockAllClasses();
 			Gdx.app.log("web", "create: classes unlocked");
 
+			if (!WebParams.get("rngtrace", "").isEmpty()) {
+				//only draws made by the actor thread, level generation is too noisy
+				com.watabou.utils.Random.trace = () -> {
+					if (com.shatteredpixel.shatteredpixeldungeon.actors.Actor.simulating) {
+						com.shatteredpixel.web.RngTrace.log("rngtrace " + com.shatteredpixel.shatteredpixeldungeon.coop.Coop.localPlayer);
+					}
+				};
+			}
 			String seedParam = WebParams.get("seed");
 			Gdx.app.log("web", "create: seed param = " + seedParam);
 			if (seedParam != null && !seedParam.isEmpty()) {
@@ -66,6 +79,28 @@ public class WebShatteredPixelDungeon extends ShatteredPixelDungeon {
 			}
 		} catch (Throwable t) {
 			Gdx.app.error("web", "create failed", t);
+		}
+	}
+
+	private static final long AUTOSAVE_INTERVAL_MS = 5000;
+	private long nextAutosave = 0;
+	private float savedAt = -1;
+
+	@Override
+	public void render() {
+		super.render();
+
+		// browsers may cut the save that onPause starts when the tab closes, so outside co-op rooms
+		// (whose state is the action log) the run is saved every few seconds while idle
+		if (Coop.enabled || !(Game.scene() instanceof GameScene) || Dungeon.hero == null) return;
+		if (!Dungeon.hero.ready || Actor.processing() || Actor.now() == savedAt) return;
+		if (Game.realTime < nextAutosave) return;
+		nextAutosave = Game.realTime + AUTOSAVE_INTERVAL_MS;
+		try {
+			Dungeon.saveAll();
+			savedAt = Actor.now();
+		} catch (IOException e) {
+			reportException(e);
 		}
 	}
 
@@ -106,8 +141,13 @@ public class WebShatteredPixelDungeon extends ShatteredPixelDungeon {
 		Dungeon.daily = Dungeon.dailyReplay = false;
 		ActionIndicator.clearAction();
 
+		// a co-op room never resumes a local save: the room's action log in the database is the
+		// state. The game starts fresh and replays the log, which also covers joining late and
+		// catching up after a desync (reload the page).
+		boolean coopRoom = !WebParams.get("room", "").isEmpty() && !WebParams.get("order", "").isEmpty();
+
 		// a reload of the tab resumes the run for this room instead of starting over
-		for (int slot = 1; slot <= GamesInProgress.MAX_SLOTS; slot++) {
+		for (int slot = 1; !coopRoom && slot <= GamesInProgress.MAX_SLOTS; slot++) {
 			GamesInProgress.Info info = GamesInProgress.check(slot);
 			if (info != null && info.seed == seed) {
 				GamesInProgress.curSlot = slot;
@@ -153,6 +193,7 @@ public class WebShatteredPixelDungeon extends ShatteredPixelDungeon {
 			Coop.players.addAll(Arrays.asList(order.split(",")));
 			Coop.transport = CoopNet::send;
 			CoopNet.listen(Coop::receive);
+			CoopNet.send("{\"spd\":\"ready\"}");
 			Dungeon.localHeroIndex = Math.max(0, Coop.localIndex());
 			if (Dungeon.partyClasses.isEmpty()) Dungeon.partyClasses.add(heroClass);
 			GamesInProgress.selectedClass = Dungeon.partyClasses.get(0);

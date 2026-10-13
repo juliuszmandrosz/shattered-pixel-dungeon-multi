@@ -23,6 +23,7 @@ package com.shatteredpixel.shatteredpixeldungeon;
 
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.TitleScene;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.WelcomeScene;
@@ -52,7 +53,7 @@ public class ShatteredPixelDungeon extends Game {
 
 		//randomness requested from the render side while in a level (particles, UI) is kept
 		//separate from the simulation's, see Random.Gate
-		Random.setGate( () -> scene() instanceof GameScene && !Actor.processing() );
+		Random.setGate( () -> !Actor.simulating && !InterlevelScene.simulating );
 
 		//pre-v3.3.0
 		com.watabou.utils.Bundle.addAlias(

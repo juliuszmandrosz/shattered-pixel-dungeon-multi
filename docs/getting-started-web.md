@@ -51,6 +51,7 @@ present it skips the welcome, title and hero selection screens:
 | `seed` | dungeon seed as a number (0 .. 26^9-1), applied through the custom seed setting |
 | `heroClass` | `WARRIOR`, `MAGE`, `ROGUE`, `HUNTRESS`, `DUELIST` or `CLERIC` |
 | `party` | every party member's class in player order, e.g. `WARRIOR,MAGE` |
+| `rngtrace` | debug: log the JS stack of every simulation RNG draw made by the actor thread (`rngtrace <player>` in the console). Only readable with `obfuscated=false` in `web/build.gradle`. |
 | `room`, `player`, `order` | co-op: room id, this player's id, all player ids in order (comma separated). With all three present the game runs in lockstep co-op; the hero at index i of `party` belongs to the player at index i of `order`. Without them the party is played hot-seat from one client. |
 
 A reload of the page resumes the run that has the same seed instead of starting over.
@@ -60,15 +61,32 @@ All hero classes are unlocked on the web build regardless of badges.
 
 Every client runs the full simulation (deterministic: seeded RNG with a separate generator for
 visuals, ordered actor and mob collections, id tie-breaks). Only player actions travel: a tap on
-the map or a rest is posted to the hosting page as `{spd:"action", type, payload}`, the page
-relays it (Realtime Database in the lobby, an in-page relay in `lobby/public/test/coop.html`)
-and every client receives `{spd:"action", uid, seq, type, payload}`. `Coop` queues the action
-for the hero that belongs to `uid` and applies it when that hero's `act()` runs with nothing to
-do, so all clients apply it at the same point of the simulation. Each applied action logs a
-state checksum (`coop: applied seq=… checksum=…`) that must match across clients.
-Not yet in co-op: item use (blocked with a message), talents, selectors and prompts opened
-inside the simulation, resync of a client that fell out of sync, death handling beyond
-"the run continues while someone is alive".
+the map, a rest, a search, an item use, a target pick or an item pick is posted to the hosting
+page as `{spd:"action", type, payload}`, the page relays it (Realtime Database in the lobby, an
+in-page relay in `lobby/public/test/coop.html`) and every client receives
+`{spd:"action", uid, seq, type, payload}`. `Coop` queues the action for the hero that belongs
+to `uid` and applies it when that hero's `act()` runs with nothing to do, so all clients apply
+it at the same point of the simulation. Selectors opened by the simulation (wand target, item
+to read a scroll on) are parked, the owner answers them through the queue and every client
+resolves the parked selector with the same answer. Each applied action logs a state checksum
+(`coop: applied seq=… checksum=… now=… rng=…`) and sends it as a `check` message; a client whose
+checksum differs prints "Out of sync" and should reload, which replays the room's action log
+from the start (rooms always begin a fresh run, so a reload is also how a late joiner catches
+up). The HUD, toolbar and inventory follow `Dungeon.localHero()`.
+
+The RNG gate matters: `Random` uses the simulation generator only while the actor thread runs
+(`Actor.simulating`) or a level is being generated (`InterlevelScene.simulating`). Particles
+and other render-side callers get a separate generator. The gate cannot use thread identity
+because on the web `Thread.currentThread()` is not stable across green-thread switches, so
+`Actor.process` clears the flag around the two points where it blocks, and the level
+generation thread clears its flag before the story screen and fade are rendered (their length
+depends on the player). `Dungeon.hero` is set by `Actor.process` to the acting hero, or to a
+deterministic hero for mobs, blobs and buffs, and only goes back to the local hero while the
+actor thread is paused.
+
+Not yet in co-op: talents, `WndOptions` prompts opened inside the simulation, non-owner
+clients may still see item windows, death handling beyond "the run continues while someone
+is alive".
 
 ## Where saves live
 
@@ -103,4 +121,4 @@ Every change is guarded by `DeviceCompat.isWeb()`, so native builds behave exact
 - No fullscreen toggle and no vibration.
 - `app.js` is large. Put it behind a CDN with compression, or enable `obfuscated`/`BALANCED` optimisation in `web/build.gradle` for a smaller file.
 - Tested so far: welcome, hero selection, level generation, movement, combat, save and reload, pause on tab switch.
-- Saves triggered by closing or reloading the tab can be cut off: the IndexedDB write is asynchronous and the page may unload first. The game detects this on next start ("interrupted while saving") and recovers. A periodic autosave on web is the planned fix.
+- Saves triggered by closing or reloading the tab can be cut off: the IndexedDB write is asynchronous and the page may unload first. The game detects this on next start ("interrupted while saving") and recovers. Outside co-op rooms the web build therefore autosaves every 5 seconds of play (`WebShatteredPixelDungeon.render`). Co-op rooms never save: they replay the action log instead.

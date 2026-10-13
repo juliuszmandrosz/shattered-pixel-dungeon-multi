@@ -156,14 +156,6 @@ public class Item implements Bundlable {
 	
 	public void execute( Hero hero, String action ) {
 
-		//co-op: item use has to travel through the action queue, which is not wired up yet
-		if (com.shatteredpixel.shatteredpixeldungeon.coop.Coop.enabled
-				&& !com.shatteredpixel.shatteredpixeldungeon.coop.Coop.applying
-				&& !action.equals( AC_THROW ) && !action.equals( AC_DROP )) {
-			com.shatteredpixel.shatteredpixeldungeon.utils.GLog.w( "Items cannot be used in co-op yet." );
-			return;
-		}
-
 		GameScene.cancel();
 		curUser = hero;
 		curItem = this;

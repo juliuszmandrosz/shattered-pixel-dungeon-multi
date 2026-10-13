@@ -71,6 +71,11 @@ public class Random {
 	//otherwise co-op clients with different frame rates diverge. The gate is installed by the game.
 	private static final java.util.Random visual = new java.util.Random();
 	private static Gate gate = null;
+	/** Debug hook: called for every draw that hits the simulation generator. */
+	public interface TraceHook {
+		void draw();
+	}
+	public static TraceHook trace = null;
 	static {
 		resetGenerators();
 	}
@@ -104,6 +109,7 @@ public class Random {
 		if (top == simulation && gate != null && gate.visual()) {
 			return visual;
 		}
+		if (top == simulation && trace != null) trace.draw();
 		return top;
 	}
 

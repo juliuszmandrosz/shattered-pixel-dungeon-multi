@@ -225,6 +225,8 @@ public class GameScene extends PixelScene {
 
 	@Override
 	public void create() {
+		InterlevelScene.simulating = false;
+		Dungeon.unfocusHero();
 		
 		if (Dungeon.hero == null || Dungeon.level == null){
 			ShatteredPixelDungeon.switchNoFade(TitleScene.class);
@@ -781,7 +783,7 @@ public class GameScene extends PixelScene {
 			GameScene.flashForDocument(Document.ADVENTURERS_GUIDE, Document.GUIDE_DIEING);
 		}
 
-		TrinketCatalyst cata = Dungeon.hero.belongings.getItem(TrinketCatalyst.class);
+		TrinketCatalyst cata = Dungeon.localHero().belongings.getItem(TrinketCatalyst.class);
 		if (cata != null && cata.hasRolledTrinkets()){
 			addToFront(new TrinketCatalyst.WndTrinket(cata));
 		}
@@ -793,7 +795,7 @@ public class GameScene extends PixelScene {
 		if (!Dungeon.hero.isAlive()){
 			//check if hero has an unblessed ankh
 			Ankh ankh = null;
-			for (Ankh i : Dungeon.hero.belongings.getAllItems(Ankh.class)){
+			for (Ankh i : Dungeon.localHero().belongings.getAllItems(Ankh.class)){
 				if (!i.isBlessed()){
 					ankh = i;
 				}
@@ -855,7 +857,7 @@ public class GameScene extends PixelScene {
 	public synchronized void onPause() {
 		try {
 			//see destroy() for why the web backend never blocks on the actor thread
-			if (!Dungeon.hero.ready && !DeviceCompat.isWeb()) waitForActorThread(500, false);
+			if (!Dungeon.localHero().ready && !DeviceCompat.isWeb()) waitForActorThread(500, false);
 			Dungeon.saveAll();
 			Badges.saveGlobal();
 			Journal.saveGlobal();
@@ -930,12 +932,17 @@ public class GameScene extends PixelScene {
 			} else if (notifyDelay <= 0f) {
 				notifyDelay += 1/60f;
 				synchronized (actorThread) {
-					actorThread.notify();
+					try {
+						actorThread.notify();
+					} catch (IllegalMonitorStateException e) {
+						//web backend: thread identity is unreliable, the actor thread polls with a timeout anyway
+						System.err.println("coop: scene notify without monitor");
+					}
 				}
 			}
 		}
 
-		if (Dungeon.hero.ready && Dungeon.hero.paralysed == 0) {
+		if (Dungeon.localHero().ready && Dungeon.hero.paralysed == 0) {
 			log.newLine();
 		}
 
@@ -969,7 +976,7 @@ public class GameScene extends PixelScene {
 
 		}
 
-		cellSelector.enable(Dungeon.hero.ready);
+		cellSelector.enable(Dungeon.localHero().ready);
 
 		if (!toDestroy.isEmpty()) {
 			for (Gizmo g : toDestroy) {
@@ -1657,11 +1664,23 @@ public class GameScene extends PixelScene {
 		if (cellSelector.listener != null && cellSelector.listener != defaultCellListener){
 			cellSelector.listener.onSelect(null);
 		}
+		//co-op: a selector opened while an action is applied is answered through the queue.
+		//Only the owner of the acting hero gets to pick; the others just park the listener.
+		if (Coop.enabled && Coop.applying && listener != defaultCellListener) {
+			Coop.proxiedCellListener = listener;
+			if (!Coop.isLocal( Dungeon.hero )) {
+				return;
+			}
+		}
 		cellSelector.listener = listener;
-		cellSelector.enabled = Dungeon.hero.ready;
+		cellSelector.enabled = Dungeon.localHero().ready;
 		if (scene != null) {
 			scene.prompt(listener.prompt());
 		}
+	}
+
+	public static boolean isDefaultCellListener( CellSelector.Listener listener ) {
+		return listener == defaultCellListener;
 	}
 	
 	public static boolean cancelCellSelector() {
@@ -1676,6 +1695,14 @@ public class GameScene extends PixelScene {
 	
 	public static WndBag selectItem( WndBag.ItemSelector listener ) {
 		cancel();
+
+		//co-op: same as selectCell, the owner picks and the pick travels as an action
+		if (Coop.enabled && Coop.applying) {
+			Coop.proxiedItemSelector = listener;
+			if (!Coop.isLocal( Dungeon.hero )) {
+				return null;
+			}
+		}
 
 		if (scene != null) {
 			//TODO can the inventory pane work in these cases? bad to fallback to mobile window
@@ -1723,7 +1750,7 @@ public class GameScene extends PixelScene {
 			if (scene != null && scene.inventory != null){
 				scene.inventory.setSelector(savedSelector);
 			} else {
-				addToFront(new WndBag(Dungeon.hero.belongings.backpack, savedSelector));
+				addToFront(new WndBag(Dungeon.localHero().belongings.backpack, savedSelector));
 			}
 			savedSelector = null;
 		}
@@ -1731,10 +1758,10 @@ public class GameScene extends PixelScene {
 
 	public static boolean cancel() {
 		cellSelector.resetKeyHold();
-		if (Dungeon.hero != null && (Dungeon.hero.curAction != null || Dungeon.hero.resting)) {
+		if (Dungeon.hero != null && (Dungeon.localHero().curAction != null || Dungeon.localHero().resting)) {
 			
-			if (!Coop.enabled) Dungeon.hero.curAction = null;
-			if (!Coop.enabled) Dungeon.hero.resting = false;
+			if (!Coop.enabled) Dungeon.localHero().curAction = null;
+			if (!Coop.enabled) Dungeon.localHero().resting = false;
 			return true;
 			
 		} else {

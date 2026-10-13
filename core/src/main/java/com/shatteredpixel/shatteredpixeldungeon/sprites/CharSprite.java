@@ -833,7 +833,12 @@ public class CharSprite extends MovieClip implements Tweener.Listener, MovieClip
 				if (ch != null) ch.onMotionComplete();
 
 				GameScene.sortMobSprites();
-				notifyAll();
+				try {
+					notifyAll();
+				} catch (IllegalMonitorStateException e) {
+					//web backend: thread identity is unreliable, the actor thread polls with a timeout anyway
+					System.err.println("coop: sprite notify without monitor");
+				}
 			}
 
 		}
