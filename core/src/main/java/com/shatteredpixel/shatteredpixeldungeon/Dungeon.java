@@ -252,6 +252,8 @@ public class Dungeon {
 			Generator.fullReset();
 
 		Random.resetGenerators();
+		//the simulation generator is seeded from the run seed so co-op clients draw identical numbers
+		Random.seedSimulation( seed );
 		
 		Statistics.reset();
 		Notes.reset();
@@ -602,6 +604,7 @@ public class Dungeon {
 	public  static final String VERSION		= "version";
 	private static final String SEED		= "seed";
 	private static final String CUSTOM_SEED	= "custom_seed";
+	private static final String SIM_RNG		= "sim_rng";
 	private static final String DAILY	    = "daily";
 	private static final String DAILY_REPLAY= "daily_replay";
 	private static final String LAST_PLAYED = "last_played";
@@ -629,6 +632,7 @@ public class Dungeon {
 			bundle.put( VERSION, version = Game.versionCode );
 			bundle.put( SEED, seed );
 			bundle.put( CUSTOM_SEED, customSeedText );
+			bundle.put( SIM_RNG, Random.simulationState() );
 			bundle.put( DAILY, daily );
 			bundle.put( DAILY_REPLAY, dailyReplay );
 			bundle.put( LAST_PLAYED, lastPlayed = Game.realTime);
@@ -729,6 +733,9 @@ public class Dungeon {
 
 		seed = bundle.contains( SEED ) ? bundle.getLong( SEED ) : DungeonSeed.randomSeed();
 		customSeedText = bundle.getString( CUSTOM_SEED );
+		if (bundle.contains( SIM_RNG )) {
+			Random.restoreSimulationState( bundle.getLong( SIM_RNG ) );
+		}
 		daily = bundle.getBoolean( DAILY );
 		dailyReplay = bundle.getBoolean( DAILY_REPLAY );
 

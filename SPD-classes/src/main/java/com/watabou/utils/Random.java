@@ -31,17 +31,80 @@ import java.util.List;
 
 public class Random {
 
+	/**
+	 * Generator with an explicit, readable state so the simulation's randomness can be
+	 * seeded identically on every co-op client, saved, and restored. SplitMix64 drives the
+	 * state, outputs satisfy java.util.Random's next(bits) contract.
+	 */
+	public static class SeededGenerator extends java.util.Random {
+		private long state;
+
+		public SeededGenerator( long seed ) {
+			super( 0 );
+			state = seed;
+		}
+
+		public synchronized long state() { return state; }
+		public synchronized void state( long value ) { state = value; }
+
+		@Override
+		protected int next( int bits ) {
+			long z = (state += 0x9E3779B97F4A7C15L);
+			z = (z ^ (z >>> 30)) * 0xBF58476D1CE4E5B9L;
+			z = (z ^ (z >>> 27)) * 0x94D049BB133111EBL;
+			z = z ^ (z >>> 31);
+			return (int)(z >>> (64 - bits));
+		}
+	}
+
+	/** Decides whether a call outside any pushed generator belongs to visuals rather than the simulation. */
+	public interface Gate {
+		boolean visual();
+	}
+
 	//we store a stack of random number generators, which may be seeded deliberately or randomly.
 	//top of the stack is what is currently being used to generate new numbers.
-	//the base generator is always created with no seed, and cannot be popped.
+	//the base generator is the simulation generator and cannot be popped.
 	private static ArrayDeque<java.util.Random> generators;
+	private static SeededGenerator simulation;
+	//particles, UI and other render-side callers must not consume simulation randomness,
+	//otherwise co-op clients with different frame rates diverge. The gate is installed by the game.
+	private static final java.util.Random visual = new java.util.Random();
+	private static Gate gate = null;
 	static {
 		resetGenerators();
 	}
 
 	public static synchronized void resetGenerators(){
 		generators = new ArrayDeque<>();
-		generators.push(new java.util.Random());
+		simulation = new SeededGenerator( scrambleSeed( System.nanoTime() ^ visual.nextLong() ) );
+		generators.push( simulation );
+	}
+
+	public static synchronized void setGate( Gate g ){
+		gate = g;
+	}
+
+	/** Seeds the simulation generator deterministically, used at the start of a run. */
+	public static synchronized void seedSimulation( long seed ){
+		simulation.state( scrambleSeed( seed ) );
+	}
+
+	public static synchronized long simulationState(){
+		return simulation.state();
+	}
+
+	public static synchronized void restoreSimulationState( long state ){
+		simulation.state( state );
+	}
+
+	//the generator the caller should use: a pushed one, or the simulation/visual base
+	private static java.util.Random current(){
+		java.util.Random top = generators.peekFirst();
+		if (top == simulation && gate != null && gate.visual()) {
+			return visual;
+		}
+		return top;
 	}
 
 	public static synchronized void pushGenerator(){
@@ -79,8 +142,8 @@ public class Random {
 	}
 
 	public static synchronized float Float( boolean useGeneratorStack ) {
-		if (useGeneratorStack)  return generators.peekFirst().nextFloat();
-		else                    return generators.peekLast().nextFloat();
+		if (useGeneratorStack)  return current().nextFloat();
+		else                    return visual.nextFloat();
 	}
 
 	//returns a uniformly distributed float in the range [0, max)
@@ -106,8 +169,8 @@ public class Random {
 	//returns a uniformly distributed int in the range [-2^31, 2^31)
 	//can either use the current generator in the stack, or force the first generator (pure random)
 	public static synchronized int Int( boolean useGeneratorStack ) {
-		if (useGeneratorStack)  return generators.peekFirst().nextInt();
-		else                    return generators.peekLast().nextInt();
+		if (useGeneratorStack)  return current().nextInt();
+		else                    return visual.nextInt();
 	}
 
 	//returns a uniformly distributed int in the range [0, max)
@@ -119,8 +182,8 @@ public class Random {
 	//can either use the current generator in the stack, or force the first generator (pure random)
 	public static synchronized int Int( int max, boolean useGeneratorStack ) {
 		if (max <= 0)                   return 0;
-		else if (useGeneratorStack)     return generators.peekFirst().nextInt(max);
-		else                            return generators.peekLast().nextInt(max);
+		else if (useGeneratorStack)     return current().nextInt(max);
+		else                            return visual.nextInt(max);
 	}
 
 	//returns a uniformly distributed int in the range [min, max)
@@ -158,8 +221,8 @@ public class Random {
 	//returns a uniformly distributed long in the range [-2^63, 2^63)
 	//can either use the current generator in the stack, or force the first generator (pure random)
 	public static synchronized long Long( boolean useGeneratorStack ) {
-		if (useGeneratorStack)  return generators.peekFirst().nextLong();
-		else                    return generators.peekLast().nextLong();
+		if (useGeneratorStack)  return current().nextLong();
+		else                    return visual.nextLong();
 	}
 
 	//returns a mostly uniformly distributed long in the range [0, max)
@@ -254,7 +317,7 @@ public class Random {
 	}
 
 	public synchronized static<T> void shuffle( List<?extends T> list){
-		Collections.shuffle(list, generators.peek());
+		Collections.shuffle(list, current());
 	}
 
 	public static void shuffle( int[] array ) {
