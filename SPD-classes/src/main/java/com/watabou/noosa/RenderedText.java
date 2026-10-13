@@ -32,6 +32,7 @@ import com.badlogic.gdx.math.Affine2;
 import com.badlogic.gdx.math.Matrix4;
 import com.watabou.glwrap.Matrix;
 import com.watabou.glwrap.Quad;
+import com.watabou.utils.DeviceCompat;
 
 import java.nio.Buffer;
 import java.nio.FloatBuffer;
@@ -79,7 +80,9 @@ public class RenderedText extends Image {
 	
 	private synchronized void measure(){
 		
-		if (Thread.currentThread().getName().equals("SHPD Actor Thread")){
+		//TeaVM's green threads report the wrong current thread when JS calls back into
+		// Java, so this sanity check gives false positives on the web backend
+		if (!DeviceCompat.isWeb() && Thread.currentThread().getName().equals("SHPD Actor Thread")){
 			throw new RuntimeException("Text measured from the actor thread!");
 		}
 		
