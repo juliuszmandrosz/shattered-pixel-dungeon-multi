@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { onValue, orderByChild, query, ref } from "firebase/database";
-import { db } from "@/lib/firebase/client";
+import { firebaseDb } from "@/lib/firebase/client";
 import type { Room } from "@/lib/rooms";
 
 type RoomEntry = Room & { id: string };
@@ -11,7 +11,7 @@ export function RoomList({ onJoin }: { onJoin: (room: RoomEntry) => void }) {
   const [rooms, setRooms] = useState<RoomEntry[] | null>(null);
 
   useEffect(() => {
-    const roomsQuery = query(ref(db, "rooms"), orderByChild("createdAt"));
+    const roomsQuery = query(ref(firebaseDb(), "rooms"), orderByChild("createdAt"));
     return onValue(roomsQuery, (snapshot) => {
       const list: RoomEntry[] = [];
       snapshot.forEach((child) => {

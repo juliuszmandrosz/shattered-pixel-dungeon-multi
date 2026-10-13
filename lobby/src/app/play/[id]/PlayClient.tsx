@@ -3,7 +3,7 @@
 import { use, useEffect, useRef, useState } from "react";
 import { onChildAdded, onValue, push, ref } from "firebase/database";
 import { useAuth } from "@/hooks/useAuth";
-import { db } from "@/lib/firebase/client";
+import { firebaseDb } from "@/lib/firebase/client";
 import type { GameAction, Room, RoomPlayer } from "@/lib/rooms";
 
 /**
@@ -22,8 +22,8 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
   const seq = useRef(0);
 
   useEffect(() => {
-    const offRoom = onValue(ref(db, `rooms/${roomId}`), (s) => setRoom((s.val() as Room) ?? null));
-    const offPlayers = onValue(ref(db, `roomPlayers/${roomId}`), (s) => setPlayers((s.val() as Record<string, RoomPlayer>) ?? {}));
+    const offRoom = onValue(ref(firebaseDb(), `rooms/${roomId}`), (s) => setRoom((s.val() as Room) ?? null));
+    const offPlayers = onValue(ref(firebaseDb(), `roomPlayers/${roomId}`), (s) => setPlayers((s.val() as Record<string, RoomPlayer>) ?? {}));
     return () => {
       offRoom();
       offPlayers();
@@ -33,7 +33,7 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
   // actions from the database into the game
   useEffect(() => {
     if (!user) return;
-    return onChildAdded(ref(db, `actions/${roomId}`), (s) => {
+    return onChildAdded(ref(firebaseDb(), `actions/${roomId}`), (s) => {
       const action = s.val() as GameAction;
       frame.current?.contentWindow?.postMessage({ spd: "action", id: s.key, ...action }, window.location.origin);
     });
@@ -47,7 +47,7 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
       const data = event.data;
       if (!data || data.spd !== "action") return;
       const action: GameAction = { uid: user!.uid, seq: seq.current++, type: String(data.type), payload: data.payload ?? null, at: Date.now() };
-      push(ref(db, `actions/${roomId}`), action);
+      push(ref(firebaseDb(), `actions/${roomId}`), action);
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);

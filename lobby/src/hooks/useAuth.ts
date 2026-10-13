@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
-import { auth, ensureSignedIn } from "@/lib/firebase/client";
+import { ensureSignedIn, firebaseAuth } from "@/lib/firebase/client";
 import { NICKNAME_KEY, randomNickname } from "@/lib/rooms";
 
 /** Anonymous Firebase session plus a locally stored nickname. */
@@ -15,7 +15,7 @@ export function useAuth() {
     window.localStorage.setItem(NICKNAME_KEY, stored);
     setNicknameState(stored);
 
-    const unsubscribe = onAuthStateChanged(auth, (current) => setUser(current));
+    const unsubscribe = onAuthStateChanged(firebaseAuth(), (current) => setUser(current));
     ensureSignedIn().catch((error) => console.error("anonymous sign-in failed", error));
     return unsubscribe;
   }, []);

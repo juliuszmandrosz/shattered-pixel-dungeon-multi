@@ -4,7 +4,7 @@ import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onDisconnect, onValue, ref, remove, set, update } from "firebase/database";
 import { useAuth } from "@/hooks/useAuth";
-import { authHeader, db } from "@/lib/firebase/client";
+import { authHeader, firebaseDb } from "@/lib/firebase/client";
 import { HERO_CLASSES, type HeroClass, type Room, type RoomPlayer } from "@/lib/rooms";
 
 type Players = Record<string, RoomPlayer>;
@@ -21,9 +21,9 @@ export function RoomClient({ params }: { params: Promise<{ id: string }> }) {
 
   // room card, players, presence
   useEffect(() => {
-    const offRoom = onValue(ref(db, `rooms/${roomId}`), (s) => setRoom(s.exists() ? (s.val() as Room) : null));
-    const offPlayers = onValue(ref(db, `roomPlayers/${roomId}`), (s) => setPlayers((s.val() as Players) ?? {}));
-    const offPresence = onValue(ref(db, `presence/${roomId}`), (s) => setPresence((s.val() as Presence) ?? {}));
+    const offRoom = onValue(ref(firebaseDb(), `rooms/${roomId}`), (s) => setRoom(s.exists() ? (s.val() as Room) : null));
+    const offPlayers = onValue(ref(firebaseDb(), `roomPlayers/${roomId}`), (s) => setPlayers((s.val() as Players) ?? {}));
+    const offPresence = onValue(ref(firebaseDb(), `presence/${roomId}`), (s) => setPresence((s.val() as Presence) ?? {}));
     return () => {
       offRoom();
       offPlayers();
@@ -34,7 +34,7 @@ export function RoomClient({ params }: { params: Promise<{ id: string }> }) {
   // own presence with server-side cleanup on disconnect
   useEffect(() => {
     if (!user) return;
-    const me = ref(db, `presence/${roomId}/${user.uid}`);
+    const me = ref(firebaseDb(), `presence/${roomId}/${user.uid}`);
     set(me, { online: true });
     onDisconnect(me).remove();
     return () => {
@@ -53,12 +53,12 @@ export function RoomClient({ params }: { params: Promise<{ id: string }> }) {
 
   async function setHeroClass(heroClass: HeroClass) {
     if (!user || !me) return;
-    await update(ref(db, `roomPlayers/${roomId}/${user.uid}`), { heroClass, name: nickname || me.name });
+    await update(ref(firebaseDb(), `roomPlayers/${roomId}/${user.uid}`), { heroClass, name: nickname || me.name });
   }
 
   async function toggleReady() {
     if (!user || !me) return;
-    await update(ref(db, `roomPlayers/${roomId}/${user.uid}`), { ready: !me.ready });
+    await update(ref(firebaseDb(), `roomPlayers/${roomId}/${user.uid}`), { ready: !me.ready });
   }
 
   async function startGame() {
