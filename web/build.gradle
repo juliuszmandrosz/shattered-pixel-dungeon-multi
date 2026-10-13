@@ -38,7 +38,8 @@ gdxTeaVM {
         htmlTitle.set(appName)
         htmlWidth.set(0)
         htmlHeight.set(0)
-        obfuscated.set(false)
+        // production settings: minified output (2-3x smaller per TeaVM docs), full global analysis
+        obfuscated.set(true)
         optimization.set(OptimizationLevel.BALANCED)
     }
 
