@@ -1,0 +1,52 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "rooms": {
+      ".read": "auth != null",
+      "$roomId": {
+        ".write": false
+      }
+    },
+
+    "roomSecrets": {
+      ".read": false,
+      ".write": false
+    },
+
+    "roomPlayers": {
+      "$roomId": {
+        ".read": "auth != null",
+        "$uid": {
+          ".write": "auth != null && auth.uid == $uid && data.exists() && newData.exists()",
+          ".validate": "newData.hasChildren(['name', 'heroClass', 'ready', 'order', 'joinedAt'])",
+          "heroClass": {
+            ".validate": "newData.val() == 'WARRIOR' || newData.val() == 'MAGE' || newData.val() == 'ROGUE' || newData.val() == 'HUNTRESS' || newData.val() == 'DUELIST' || newData.val() == 'CLERIC'"
+          },
+          "order": { ".validate": "newData.val() == data.val()" },
+          "joinedAt": { ".validate": "newData.val() == data.val()" }
+        }
+      }
+    },
+
+    "presence": {
+      "$roomId": {
+        ".read": "auth != null",
+        "$uid": {
+          ".write": "auth != null && auth.uid == $uid"
+        }
+      }
+    },
+
+    "actions": {
+      "$roomId": {
+        ".read": "auth != null && root.child('roomPlayers').child($roomId).child(auth.uid).exists()",
+        "$actionId": {
+          ".write": "auth != null && !data.exists() && newData.child('uid').val() == auth.uid && root.child('roomPlayers').child($roomId).child(auth.uid).exists() && root.child('rooms').child($roomId).child('status').val() == 'playing'",
+          ".validate": "newData.hasChildren(['uid', 'seq', 'type', 'at']) && newData.child('seq').isNumber() && newData.child('type').isString()"
+        }
+      }
+    }
+  }
+}
