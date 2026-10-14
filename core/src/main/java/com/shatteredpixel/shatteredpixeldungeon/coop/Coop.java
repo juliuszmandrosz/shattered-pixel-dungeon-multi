@@ -94,6 +94,19 @@ public class Coop {
 		return e == null ? 0 : e;
 	}
 
+	/** Number of enemies in the merged party field of view (what every client sees on the map). */
+	public static int partyVisibleEnemies(){
+		if (Dungeon.level == null || Dungeon.level.heroFOV == null) return 0;
+		int n = 0;
+		for (Mob mob : Dungeon.level.mobs) {
+			if (mob.alignment == Char.Alignment.ENEMY && mob.pos >= 0 && mob.pos < Dungeon.level.heroFOV.length
+					&& Dungeon.level.heroFOV[mob.pos]) {
+				n++;
+			}
+		}
+		return n;
+	}
+
 	/** True when any party member currently sees an enemy (merged party field of view). */
 	public static boolean partySeesEnemy(){
 		if (Dungeon.level == null || Dungeon.level.heroFOV == null) return false;

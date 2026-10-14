@@ -24,6 +24,7 @@ package com.shatteredpixel.shatteredpixeldungeon.ui;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
 import com.shatteredpixel.shatteredpixeldungeon.SPDAction;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
 import com.shatteredpixel.shatteredpixeldungeon.windows.WndKeyBindings;
@@ -89,7 +90,9 @@ public class DangerIndicator extends Tag {
 	public void update() {
 		
 		if (Dungeon.localHero().isAlive()) {
-			int v =  Dungeon.localHero().visibleEnemies();
+			//co-op: the party shares vision, so count what the party sees right now rather than
+			//the local hero's list, which is only refreshed when that hero acts
+			int v = Coop.enabled ? Coop.partyVisibleEnemies() : Dungeon.localHero().visibleEnemies();
 			if (v != lastNumber) {
 				lastNumber = v;
 				if (visible = lastNumber > 0) {
