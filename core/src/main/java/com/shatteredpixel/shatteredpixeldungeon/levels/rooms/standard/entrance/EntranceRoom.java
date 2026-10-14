@@ -100,18 +100,15 @@ public class EntranceRoom extends StandardRoom {
 	}
 
 	public static void placeEarlyGuidePages(Level level, Room r){
-		//use a separate generator here so meta progression doesn't affect levelgen
-		//(in co-op it is seeded, every client must place the pages identically)
-		if (com.shatteredpixel.shatteredpixeldungeon.coop.Coop.enabled) {
-			Random.pushGenerator( Dungeon.seedCurDepth() ^ 0x6a09e667L );
-		} else {
-			Random.pushGenerator();
-		}
-
-		//places the first guidebook page on floor 1
 		//co-op: the journal and the tutorial setting are this client's, so a shared game never
 		//places the guide pages (the heaps would differ between players)
-		if (Dungeon.depth == 1 && !com.shatteredpixel.shatteredpixeldungeon.coop.Coop.enabled &&
+		if (com.shatteredpixel.shatteredpixeldungeon.coop.Coop.enabled) return;
+
+		//use a separate generator here so meta progression doesn't affect levelgen
+		Random.pushGenerator();
+
+		//places the first guidebook page on floor 1
+		if (Dungeon.depth == 1 &&
 				(!Document.ADVENTURERS_GUIDE.isPageRead(Document.GUIDE_INTRO) || SPDSettings.intro() )){
 			int pos;
 			do {
@@ -124,8 +121,7 @@ public class EntranceRoom extends StandardRoom {
 		}
 
 		//places the third guidebook page on floor 2
-		if (Dungeon.depth == 2 && !com.shatteredpixel.shatteredpixeldungeon.coop.Coop.enabled
-				&& !Document.ADVENTURERS_GUIDE.isPageFound(Document.GUIDE_SEARCHING)){
+		if (Dungeon.depth == 2 && !Document.ADVENTURERS_GUIDE.isPageFound(Document.GUIDE_SEARCHING)){
 			int pos;
 			do {
 				//can't be on bottom row of tiles

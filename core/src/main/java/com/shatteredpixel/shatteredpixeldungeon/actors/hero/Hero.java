@@ -890,12 +890,14 @@ public class Hero extends Char {
 					return false;
 				}
 				Coop.apply( this, order );
-				if (curAction != null || resting) break;
-				//an instant action that took time: let the others act before looking again
+				//an order that took time (rest, wait, eating...): the turn is over, the others act
+				//before this hero looks at the log again. Checked before resting: rest() has spent
+				//TIME_TO_REST already, the resting branch below would spend it a second time.
 				if (cooldown() > 0) {
 					next();
 					return false;
 				}
+				if (curAction != null || resting) break;
 			}
 		}
 

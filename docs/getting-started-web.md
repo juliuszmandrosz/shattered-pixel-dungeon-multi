@@ -169,6 +169,17 @@ button, resume button, toolbar wait/pick-up, keyboard moves. Calling `hero.handl
 mutating `curAction`/`resting` from the UI directly desyncs the clients (the attack button did
 exactly that: a snake died on one client and lived on the other). A tap while the local hero
 walks a path is queued too and replaces the walk, like a tap does in single player.
+`GameScene.cancel` (the toolbar's first press while the hero walks or rests) goes through the
+log as a `cancel` entry that costs no time; before that it returned true in co-op without
+changing anything, so every toolbar button was dead while resting. An applied order that spent
+time (a rest, a wait, eating) ends the hero's act at once: a full rest fell through to the
+resting branch and paid `TIME_TO_REST` twice on its first turn.
+
+**Review of 2026-10-14 (cloud code review of the co-op sources) also found:** `Mob.chooseEnemy`
+collected candidate targets in a `HashSet`, which iterates by identity hash and so could pick a
+different hero on each client when two stood at the same distance (now `LinkedHashSet`); the
+party swap in `Hero.getCloser` went through `Char.interact`, whose ally-warp talent branch
+teleported heroes past the paralysis checks (heroes are excluded from it now).
 
 Not yet in co-op: talents, `WndOptions` prompts opened inside the simulation, non-owner
 clients may still see item windows, death handling beyond "the run continues while someone

@@ -107,6 +107,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 
 public abstract class Mob extends Char {
 
@@ -413,7 +414,9 @@ public abstract class Mob extends Char {
 
 		if ( newEnemy ) {
 
-			HashSet<Char> enemies = new HashSet<>();
+			//co-op: insertion order, so ties on distance resolve the same on every client
+			//(a HashSet iterates by identity hash, which differs between clients)
+			HashSet<Char> enemies = new LinkedHashSet<>();
 
 			//if we are amoked...
 			if ( buff(Amok.class) != null) {

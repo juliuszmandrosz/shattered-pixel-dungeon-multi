@@ -268,7 +268,8 @@ public abstract class Char extends Actor {
 		}
 
 		//warp instantly with allies in this case
-		if (c == Dungeon.hero && Dungeon.hero.hasTalent(Talent.ALLY_WARP)){
+		//(co-op: not when the ally is another hero swapping places, see Hero.getCloser)
+		if (c == Dungeon.hero && Dungeon.hero.hasTalent(Talent.ALLY_WARP) && !(this instanceof Hero)){
 			PathFinder.buildDistanceMap(c.pos, BArray.or(Dungeon.level.passable, Dungeon.level.avoid, null));
 			if (PathFinder.distance[pos] == Integer.MAX_VALUE){
 				return true;

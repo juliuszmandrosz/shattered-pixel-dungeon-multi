@@ -287,6 +287,19 @@ public class Coop {
 		if (hero.handle( cell )) hero.next();
 	}
 
+	/**
+	 * Stop what the hero is doing (a walk, a full rest) without spending a turn: the toolbar's
+	 * first press while busy, GameScene.cancel. Through the log, like every change to a hero.
+	 */
+	public static void cancel( Hero hero ){
+		if (enabled && !applying) {
+			if (isLocal( hero ) && allowed( hero )) submit( "cancel", "" );
+			return;
+		}
+		hero.curAction = null;
+		hero.resting = false;
+	}
+
 	/** Resume an interrupted path (the resume indicator). */
 	public static void resume( Hero hero ){
 		if (enabled && !applying) {
@@ -594,6 +607,10 @@ public class Coop {
 				case "resume":
 					hero.resume();
 					result = hero.curAction != null;
+					break;
+				case "cancel":
+					cancel( hero );
+					result = true;
 					break;
 				case "wait":
 					applyWait( hero );

@@ -1758,10 +1758,20 @@ public class GameScene extends PixelScene {
 
 	public static boolean cancel() {
 		cellSelector.resetKeyHold();
+		if (Coop.enabled) {
+			//the hero's state changes through the log only; a walk that already reached its cell
+			//is nothing to cancel (isBusy), so the toolbar works right after arriving
+			Hero local = Dungeon.localHero();
+			if (local != null && local.isBusy()) {
+				Coop.cancel( local );
+				return true;
+			}
+			return cancelCellSelector();
+		}
 		if (Dungeon.hero != null && (Dungeon.localHero().curAction != null || Dungeon.localHero().resting)) {
 			
-			if (!Coop.enabled) Dungeon.localHero().curAction = null;
-			if (!Coop.enabled) Dungeon.localHero().resting = false;
+			Dungeon.localHero().curAction = null;
+			Dungeon.localHero().resting = false;
 			return true;
 			
 		} else {
