@@ -128,7 +128,9 @@ public class AttackIndicator extends Tag {
 				lastTarget = null;
 			} else {
 				active = true;
-				lastTarget = Random.element( candidates );
+				//co-op: this runs on the actor thread (Hero.ready) and must not touch the
+				//simulation generator, the candidates also differ per client. First one it is.
+				lastTarget = candidates.get( 0 );
 				updateImage();
 				flash();
 			}

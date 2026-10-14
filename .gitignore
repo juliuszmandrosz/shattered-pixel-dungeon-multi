@@ -21,3 +21,4 @@ local.properties
 
 # JVM heap dumps (TeaVM out-of-memory runs)
 *.hprof
+lobby/public/gamedbg/

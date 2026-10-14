@@ -258,6 +258,22 @@ public abstract class Actor implements Bundlable {
 	//where the thread blocks, because on the web (green threads) the render thread runs in between
 	//and its particles must not consume simulation randomness. Thread identity is not reliable there.
 	public static volatile boolean simulating = false;
+
+	/**
+	 * Runs game logic triggered by a finished animation (the render thread: attack and operate
+	 * callbacks, missiles landing, knockback) as part of the simulation. The actor thread is
+	 * parked meanwhile and these callbacks roll damage and more, so their random draws must come
+	 * from the simulation generator, identically on every co-op client.
+	 */
+	public static void simulate( com.watabou.utils.Callback callback ){
+		boolean was = simulating;
+		simulating = true;
+		try {
+			callback.call();
+		} finally {
+			simulating = was;
+		}
+	}
 	
 	public static void process() {
 		

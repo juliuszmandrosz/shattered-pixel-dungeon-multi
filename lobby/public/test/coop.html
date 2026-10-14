@@ -33,7 +33,7 @@
     const q = new URLSearchParams({ room, player: id, order: ids.join(","), seed, party, heroClass: classes[i] });
     if (params.get("rngtrace")) q.set("rngtrace", "1");
     q.set("v", String(Date.now()));
-    frames[id].src = "/game/index.html?" + q.toString();
+    frames[id].src = (params.get("base") || "/game") + "/index.html?" + q.toString();
   });
   // the log of everything relayed so far; a frame that becomes ready later gets the whole log
   const log = [];

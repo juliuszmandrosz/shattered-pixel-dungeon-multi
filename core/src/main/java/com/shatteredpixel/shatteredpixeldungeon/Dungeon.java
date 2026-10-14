@@ -1219,6 +1219,23 @@ public class Dungeon {
 		return PathFinder.find( ch.pos, to, findPassable(ch, pass, vis, chars) );
 
 	}
+
+	/**
+	 * Co-op: a path that may run through other party members (the hero swaps places with them,
+	 * see Hero.getCloser). Only used when no path around them exists, so heroes still walk
+	 * around each other in the open and only push past in corridors and doorways.
+	 */
+	public static PathFinder.Path findPathThroughParty(Char ch, int to, boolean[] pass, boolean[] vis) {
+
+		boolean[] passable = findPassable(ch, pass, vis, true);
+		for (Hero h : heroes) {
+			if (h != ch && h.isAlive() && h.pos >= 0 && h.pos < passable.length) {
+				passable[h.pos] = pass[h.pos];
+			}
+		}
+		return PathFinder.find( ch.pos, to, passable );
+
+	}
 	
 	public static int findStep(Char ch, int to, boolean[] pass, boolean[] visible, boolean chars ) {
 

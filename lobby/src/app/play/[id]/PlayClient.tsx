@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { get, onChildAdded, onValue, ref, runTransaction, set } from "firebase/database";
 import { useAuth } from "@/hooks/useAuth";
@@ -53,26 +53,57 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
     if (!user || !gameReady) return;
     const pending = new Map<number, GameAction>();
     let next = 1;
-    return onChildAdded(ref(firebaseDb(), `actions/${roomId}`), (s) => {
+    let gapTimer: ReturnType<typeof setTimeout> | null = null;
+    const db = firebaseDb();
+    // a seq is reserved by a transaction and written afterwards; a client that dies in between
+    // would leave a gap that stalls everyone. Whoever waits on a gap for a while fills it with
+    // a "void" entry (first writer wins, the rules refuse a second write), the late writer's
+    // sendAction retries with a fresh seq, and void entries are not delivered to the game.
+    const fillGap = (seq: number) =>
+      set(ref(db, `actions/${roomId}/${actionKey(seq)}`), { uid: user!.uid, seq, type: "void", payload: null, at: Date.now() }).catch(() => {});
+    const off = onChildAdded(ref(db, `actions/${roomId}`), (s) => {
       const action = s.val() as GameAction;
       if (typeof action.seq !== "number" || action.seq < next) return;
       pending.set(action.seq, action);
       while (pending.has(next)) {
         const a = pending.get(next)!;
         pending.delete(next);
-        frame.current?.contentWindow?.postMessage({ spd: "action", ...a }, window.location.origin);
+        if (a.type !== "void") frame.current?.contentWindow?.postMessage({ spd: "action", ...a }, window.location.origin);
         next++;
       }
+      if (gapTimer) clearTimeout(gapTimer);
+      gapTimer = null;
+      if (pending.size > 0) {
+        const missing = next;
+        gapTimer = setTimeout(() => {
+          if (!pending.has(missing) && pending.size > 0) void fillGap(missing);
+        }, GAP_SECONDS * 1000);
+      }
     });
+    return () => {
+      off();
+      if (gapTimer) clearTimeout(gapTimer);
+    };
   }, [roomId, user, gameReady]);
 
   const sendAction = useCallback(
     async (type: string, payload: unknown) => {
       const db = firebaseDb();
-      const result = await runTransaction(ref(db, `rooms/${roomId}/nextSeq`), (n: number | null) => (n ?? 0) + 1);
-      const seq = result.snapshot.val() as number;
-      const action: GameAction = { uid: user!.uid, seq, type, payload: payload ?? null, at: Date.now() };
-      await set(ref(db, `actions/${roomId}/${actionKey(seq)}`), action);
+      // a reserved seq may already be taken (a client that waited on a gap fills it with a
+      // "void" entry, see below) and the write is then refused: take a fresh seq and retry, so
+      // an order is never lost silently
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const result = await runTransaction(ref(db, `rooms/${roomId}/nextSeq`), (n: number | null) => (n ?? 0) + 1);
+        const seq = result.snapshot.val() as number;
+        const action: GameAction = { uid: user!.uid, seq, type, payload: payload ?? null, at: Date.now() };
+        try {
+          await set(ref(db, `actions/${roomId}/${actionKey(seq)}`), action);
+          return;
+        } catch (err) {
+          console.warn(`action ${type} seq ${seq} refused (attempt ${attempt + 1})`, err);
+        }
+      }
+      console.error(`action ${type} dropped after 4 attempts`);
     },
     [roomId, user],
   );
@@ -112,10 +143,14 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
   // skip timer: when the game waits for somebody else, every other client counts and, after
   // the limit, appends a "skip" order for that hero and turn. The game accepts the first skip
   // whose epoch still matches and drops the rest, so several clients may send one safely.
-  const myIndex = useRef(-1);
+  // player order of the fixed party; the local index decides whose skip timer this client runs
+  const order = useMemo(
+    () => (players ? Object.entries(players).sort((a, b) => a[1].order - b[1].order).map(([uid]) => uid) : []),
+    [players],
+  );
   useEffect(() => {
-    if (!turn || !gameReady) return;
-    if (turn.hero === myIndex.current) return;
+    if (!turn || !gameReady || !user) return;
+    if (turn.hero === order.indexOf(user.uid)) return;
     const limit = turn.danger ? SKIP_SECONDS_DANGER : SKIP_SECONDS;
     const started = Date.now();
     let fired = false;
@@ -128,7 +163,7 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
       }
     }, 500);
     return () => clearInterval(id);
-  }, [turn, gameReady, sendAction]);
+  }, [turn, gameReady, sendAction, order, user]);
 
   function skipNow() {
     if (turn) void sendAction("skip", `${turn.hero}:${turn.epoch}`);
@@ -148,10 +183,6 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
     );
   }
 
-  const order = Object.entries(players)
-    .sort((a, b) => a[1].order - b[1].order)
-    .map(([uid]) => uid);
-  myIndex.current = order.indexOf(user.uid);
   const query = new URLSearchParams({
     room: roomId,
     player: user.uid,
@@ -198,9 +229,14 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
 }
 
 const ROW = 44;
-// seconds another player may keep everyone waiting before their hero waits a turn
-const SKIP_SECONDS = 20;
+// seconds another player may keep everyone waiting before their hero waits a turn (the story
+// screen and badge popups at the start count too, so not too short)
+const SKIP_SECONDS = 30;
 const SKIP_SECONDS_DANGER = 45;
+// the countdown is only shown for the last seconds, a timer on every turn feels like pressure
+const COUNTDOWN_SECONDS = 10;
+// a missing seq older than this is treated as abandoned and filled with a void entry
+const GAP_SECONDS = 6;
 
 /**
  * Turn order HUD on the left (below the game's own status pane): the hero waiting for input is
@@ -248,14 +284,14 @@ function TurnOrder({
               <div className="pd-muted text-[10px]">{HERO_LABEL[p?.heroClass ?? "WARRIOR"]}</div>
             </div>
             {active && myTurn && <span className="pd-positive pd-blink text-[10px]">YOU</span>}
-            {active && !myTurn && (
+            {active && !myTurn && limit > 0 && limit - waited <= COUNTDOWN_SECONDS && (
               <button
                 type="button"
                 onClick={onSkip}
                 title="Make this hero wait a turn now"
                 className="pd-btn pd-btn-grey pointer-events-auto px-1 text-[10px]"
               >
-                {limit > 0 ? `${Math.max(0, limit - waited)}s` : "..."}
+                {`${Math.max(0, limit - waited)}s`}
               </button>
             )}
           </div>

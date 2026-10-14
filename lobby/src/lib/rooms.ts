@@ -6,6 +6,7 @@
  * roomPlayers/{roomId}/{uid} members in join order, players update their own heroClass/ready
  * presence/{roomId}/{uid}    online flag cleared by onDisconnect
  * rooms/{roomId}/nextSeq     counter bumped by a transaction for every action (players may write it)
+ * actions/{roomId}/{seq}   one entry per seq; type "void" fills a seq that was reserved but never written
  * actions/{roomId}/{seq}     append-only stream of game actions keyed by the zero-padded seq
  */
 

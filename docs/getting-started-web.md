@@ -107,6 +107,29 @@ order, identical everywhere) carried in the `turn` message; the game applies a s
 epoch still matches, so duplicates and late skips are dropped the same way on every client.
 A skip makes the hero wait one turn (`rest(false)`).
 
+**Party members never block.** Corridors are one tile wide, so a hero standing in a doorway
+would make every order of the hero behind it a silent no-op (`getCloser` found no path, no
+time passed; this was the "I click and nothing happens" report). `Dungeon.findPassable` lets a
+hero's path run through other heroes and `Hero.getCloser` swaps places with a hero standing on
+the next step, exactly like the ally swap in `Char.interact`; tapping a party member swaps too
+(`Hero.handle` -> `HeroAction.Interact`).
+
+**Animation callbacks are simulation.** Melee damage is rolled when the attack animation
+finishes (`CharSprite.onComplete` -> `Char.onAttackComplete`), on the render thread while the
+actor thread is parked, so the gate would hand those draws to the visual generator and every
+client would roll its own damage. `Actor.simulate(Callback)` sets `Actor.simulating` around
+every such callback: attack/operate/motion/jump completions, missiles landing (`MissileSprite`,
+`MagicMissile`, `Lightning`, `Chains`) and knockback (`Pushing`).
+
+**UI code on the actor thread must not draw.** `AttackIndicator.updateState` runs from
+`Hero.ready()` and picked a random target from a per-client list; it takes the first now.
+The camera follows the local hero only (`HeroSprite.followed`): a camera chasing every hero
+that moves scrolls the map under the player's cursor.
+
+**Lobby transport safety.** `sendAction` retries with a fresh seq when a write is refused; a
+client waiting on a missing seq for `GAP_SECONDS` writes a `void` entry there (first writer
+wins), which is never delivered to the game.
+
 Every UI path that gives the hero an order goes through `Coop` (`handleCell`, `useItem`,
 `selectItem`, `resume`, `waitOrPickup`, rest and search): tap on the map, attack button, loot
 button, resume button, toolbar wait/pick-up, keyboard moves. Calling `hero.handle()` or

@@ -104,10 +104,16 @@ public class HeroSprite extends CharSprite {
 			die();
 	}
 	
+	//co-op: the camera follows the player's own hero only; following every hero that moves
+	//would scroll the map under the cursor while another player acts
+	private boolean followed(){
+		return ch == null || ch == Dungeon.localHero();
+	}
+
 	@Override
 	public void place( int p ) {
 		super.place( p );
-		if (Game.scene() instanceof GameScene) Camera.main.panFollow(this, 5f);
+		if (Game.scene() instanceof GameScene && followed()) Camera.main.panFollow(this, 5f);
 	}
 
 	@Override
@@ -116,7 +122,7 @@ public class HeroSprite extends CharSprite {
 		if (ch != null && ch.flying) {
 			play( fly );
 		}
-		Camera.main.panFollow(this, 20f);
+		if (followed()) Camera.main.panFollow(this, 20f);
 	}
 
 	@Override
@@ -131,7 +137,7 @@ public class HeroSprite extends CharSprite {
 	public void jump( int from, int to, float height, float duration,  Callback callback ) {
 		super.jump( from, to, height, duration, callback );
 		play( fly );
-		Camera.main.panFollow(this, 20f);
+		if (followed()) Camera.main.panFollow(this, 20f);
 	}
 
 	public synchronized void read() {

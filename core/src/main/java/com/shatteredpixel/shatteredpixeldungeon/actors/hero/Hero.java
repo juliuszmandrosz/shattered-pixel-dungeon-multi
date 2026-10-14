@@ -1838,6 +1838,8 @@ public class Hero extends Char {
 	}
 	
 	private boolean walkingToVisibleTrapInFog = false;
+	//co-op: turns spent waiting behind a party member walking the same way (see getCloser)
+	private int blockedTurns = 0;
 	
 	private boolean getCloser( final int target ) {
 
@@ -1892,6 +1894,10 @@ public class Hero extends Char {
 				}
 
 				PathFinder.Path newpath = Dungeon.findPath(this, target, passable, fieldOfView, true);
+				//co-op: no way around a party member (a corridor, a doorway): go through them
+				if (newpath == null && Dungeon.heroes.size() > 1) {
+					newpath = Dungeon.findPathThroughParty(this, target, passable, fieldOfView);
+				}
 				if (newpath != null && path != null && newpath.size() > 2*path.size()){
 					path = null;
 				} else {
@@ -1905,6 +1911,38 @@ public class Hero extends Char {
 		}
 
 		if (step != -1) {
+
+			//co-op: a party member on the next step (only possible on a path through the party,
+			//see Dungeon.findPathThroughParty). A standing hero, or one coming the other way, is
+			//swapped with like an ally. One walking the same way is followed: wait a turn and
+			//keep the path, a few times at most so that a chain of blocked heroes cannot spin
+			//forever without input.
+			Char blocker = Actor.findChar( step );
+			if (blocker instanceof Hero && blocker != this) {
+				Hero other = (Hero) blocker;
+				boolean otherIdle = other.curAction == null || other.resting
+						|| (other.curAction instanceof HeroAction.Move && ((HeroAction.Move) other.curAction).dst == other.pos);
+				boolean headOn = (other.path != null && !other.path.isEmpty() && other.path.getFirst() == pos)
+						|| (other.curAction instanceof HeroAction.Move && ((HeroAction.Move) other.curAction).dst == pos);
+				if (otherIdle || headOn) {
+					blockedTurns = 0;
+					int before = pos;
+					other.interact( this );
+					if (pos != before) {
+						search( false );
+						return true;
+					}
+					return false;
+				}
+				if (++blockedTurns <= 3) {
+					if (path != null) path.addFirst( step );
+					spend( 1 / speed() );
+					return true;
+				}
+				blockedTurns = 0;
+				return false;
+			}
+			blockedTurns = 0;
 
 			float delay = 1;
 
@@ -1985,6 +2023,11 @@ public class Hero extends Char {
 			} else {
 				curAction = new HeroAction.Attack( ch );
 			}
+
+		//co-op: another hero is a party member, tapping them swaps places like with an ally
+		} else if (ch instanceof Hero && ch != this && fieldOfView[cell]) {
+
+			curAction = new HeroAction.Interact( ch );
 
 		//TODO perhaps only trigger this if hero is already adjacent? reducing mistaps
 		} else if (Dungeon.level instanceof MiningLevel &&
