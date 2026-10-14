@@ -11,7 +11,7 @@
 </style>
 </head>
 <body>
-<div id="bar">co-op harness: one game instance per player in one page, actions relayed in order like the database would · <span id="count">0 actions</span></div>
+<div id="bar">co-op harness: one game instance per player in one page, actions relayed in order like the database would · <span id="count">0 actions</span> · <span id="turn"></span></div>
 <div class="row" id="row"></div>
 <script>
   // seed and party are shared, each frame gets its own player id; all see the same order.
@@ -51,6 +51,7 @@
     for (const id of ids) if (ready[id]) frames[id].contentWindow.postMessage(msg, location.origin);
     document.getElementById("count").textContent = log.length + " messages";
   }
+  window.relay = relay; // for scripted tests
   function maybeStartScript() {
     if (!scripted.length || scriptTimer || !ids.every((id) => ready[id])) return;
     scriptTimer = setInterval(() => {
@@ -58,6 +59,33 @@
       if (!next) { clearInterval(scriptTimer); return; }
       relay(next.uid, next.type, next.payload);
     }, 2500);
+  }
+  // the lobby page's turn policy (see PlayClient.tsx), once per frame: the owner writes
+  // "nothing new" (skip hero:epoch) at once for its busy hero, or its idle hero while others
+  // move with no enemy in sight; other frames after a delay; a strict turn only after a long
+  // timeout. ?afk=A makes frame A absent (it never writes), to exercise the fallback.
+  const AFK_MS = 700, AFK_STAGGER_MS = 300, SKIP_SECONDS_DANGER = 45;
+  const absent = (params.get("afk") || "").split(",").filter(Boolean);
+  const timers = {}, sent = {}, starts = {};
+  function policy(uid, t) {
+    if (timers[uid]) { clearTimeout(timers[uid]); timers[uid] = null; }
+    if (absent.includes(uid)) return;
+    const key = t.hero + ":" + t.epoch;
+    if (!starts[uid] || starts[uid].key !== key) starts[uid] = { key, at: Date.now() };
+    const myIndex = ids.indexOf(uid);
+    const mine = t.hero === myIndex;
+    const busy = t.states[t.hero] === "walk" || t.states[t.hero] === "rest";
+    const othersBusy = t.states.some((s, i) => i !== t.hero && (s === "walk" || s === "rest"));
+    const strict = !busy && t.danger;
+    let delay = null;
+    if (!strict && (busy || othersBusy)) delay = mine ? 0 : AFK_MS + AFK_STAGGER_MS * ((myIndex - t.hero + ids.length) % ids.length);
+    else if (strict && !mine) delay = SKIP_SECONDS_DANGER * 1000;
+    if (delay === null) return;
+    timers[uid] = setTimeout(() => {
+      if (sent[uid] === key) return;
+      sent[uid] = key;
+      relay(uid, "skip", key);
+    }, Math.max(0, delay - (Date.now() - starts[uid].at)));
   }
   window.addEventListener("message", (e) => {
     const d = e.data;
@@ -68,6 +96,16 @@
       ready[uid] = true;
       for (const msg of log) frames[uid].contentWindow.postMessage(msg, location.origin);
       maybeStartScript();
+      return;
+    }
+    if (d.spd === "turn") {
+      window.lastTurn = window.lastTurn || {};
+      window.lastTurn[uid] = d;
+      document.getElementById("turn").textContent = ids.map((id) => {
+        const t = window.lastTurn[id];
+        return id + ": " + (t ? `hero ${t.hero} e${t.epoch} ${t.danger ? "COMBAT" : "explore"} ${t.waiting ? "wait" : "go"} [${t.states.join(",")}]` : "-");
+      }).join("   ");
+      policy(uid, d);
       return;
     }
     if (d.spd !== "action" || d.uid !== undefined) return; // only fresh actions from a game

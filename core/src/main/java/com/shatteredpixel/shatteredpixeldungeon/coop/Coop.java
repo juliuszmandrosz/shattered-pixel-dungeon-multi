@@ -36,11 +36,11 @@ import com.shatteredpixel.shatteredpixeldungeon.items.Item;
 import com.shatteredpixel.shatteredpixeldungeon.items.bags.Bag;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.CellSelector;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.GameScene;
+import com.shatteredpixel.shatteredpixeldungeon.sprites.CharSprite;
 import com.shatteredpixel.shatteredpixeldungeon.utils.GLog;
 import com.shatteredpixel.shatteredpixeldungeon.windows.WndBag;
 import com.watabou.utils.Random;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -59,8 +59,20 @@ import java.util.HashMap;
  *             global delivery index, identical on every client)
  *
  * Action types: cell (tap on the map), target (answer to a cell selector opened by an item),
- * item (path|action), pick (answer to an item selector), rest (1/0), search, check (seq:hash,
- * not an action: a state fingerprint other clients compare with their own).
+ * item (path|action), pick (answer to an item selector), rest (1/0), search, wait, resume,
+ * skip (hero:epoch, "nothing new for this hero": a walking hero keeps walking, an idle one
+ * lets a turn pass), check (count:hash, not an action: a state fingerprint other clients
+ * compare with their own).
+ *
+ * Turn flow (see docs/getting-started-web.md, "The log invariant"): entries are consumed from
+ * one log in seq order. A hero with something to do (a walk, resting) needs the entry at the
+ * cursor before every step: its own entry redirects or confirms it, a foreign one lets it
+ * carry on. An idle hero with no enemy in the party's sight takes its own entry at the cursor
+ * or lets a turn pass when the cursor holds someone else's entry. An idle hero while an enemy
+ * is visible waits for its own next entry wherever it is in the log (a strict turn). The
+ * page writes the skip entries that keep time flowing: at once for its own busy or idle hero
+ * while others move, after a short delay for absent players, and only after a long timeout
+ * for a strict turn.
  */
 public class Coop {
 
@@ -83,7 +95,15 @@ public class Coop {
 	}
 	public static Transport transport = null;
 
-	private static String announcedTurn = null;
+	private static String announced = null;
+
+	/** Display names of the players, in player order (from the lobby, for messages). */
+	public static ArrayList<String> names = new ArrayList<>();
+
+	//the hero the simulation is parked on, and whether that is a strict turn (idle hero while
+	//an enemy is in sight: only its own order moves the game on). UI only.
+	public static int waitingHero = -1;
+	public static boolean waitingStrict = false;
 
 	//orders applied per hero, in log order: identical on every client, so a "skip" sent for
 	//(hero, epoch) is accepted or dropped identically everywhere
@@ -107,27 +127,56 @@ public class Coop {
 		return n;
 	}
 
-	/** True when any party member currently sees an enemy (merged party field of view). */
+	/** True when any party member had an enemy in sight when it last acted (simulation state). */
 	public static boolean partySeesEnemy(){
-		if (Dungeon.level == null || Dungeon.level.heroFOV == null) return false;
-		for (Mob mob : Dungeon.level.mobs) {
-			if (mob.alignment == Char.Alignment.ENEMY && mob.pos >= 0 && mob.pos < Dungeon.level.heroFOV.length
-					&& Dungeon.level.heroFOV[mob.pos]) {
-				return true;
-			}
+		for (Hero h : Dungeon.heroes) {
+			if (h.isAlive() && h.seesEnemy()) return true;
 		}
 		return false;
 	}
 
-	/** Tells the hosting page which hero is waiting for input, for the turn order HUD and the skip timer. */
-	public static void announceTurn( Hero hero ){
+	/**
+	 * Tells the hosting page where the simulation stands, for the turn HUD and for the skip
+	 * entries it writes: the hero whose act() is next, its epoch, whether an enemy is in sight,
+	 * whether the simulation is parked on that hero right now, and every hero's state.
+	 */
+	public static void announce( Hero hero, boolean waiting ){
 		if (!enabled || transport == null) return;
-		int index = indexOf( hero );
-		String key = index + ":" + epoch( hero );
-		if (key.equals( announcedTurn )) return;
-		announcedTurn = key;
-		transport.send( "{\"spd\":\"turn\",\"hero\":" + index + ",\"epoch\":" + epoch( hero )
-				+ ",\"danger\":" + partySeesEnemy() + "}" );
+		StringBuilder states = new StringBuilder();
+		for (Hero h : Dungeon.heroes) {
+			if (states.length() > 0) states.append( ',' );
+			states.append( '"' ).append( !h.isAlive() ? "dead" : h.resting ? "rest" : h.isBusy() ? "walk" : "idle" ).append( '"' );
+		}
+		String msg = "{\"spd\":\"turn\",\"hero\":" + indexOf( hero ) + ",\"epoch\":" + epoch( hero )
+				+ ",\"danger\":" + partySeesEnemy() + ",\"waiting\":" + waiting + ",\"states\":[" + states + "]}";
+		if (msg.equals( announced )) return;
+		announced = msg;
+		transport.send( msg );
+	}
+
+	/** Name of the player who owns the hero, for UI messages. */
+	public static String nameOf( int heroIndex ){
+		if (heroIndex >= 0 && heroIndex < names.size()) return names.get( heroIndex );
+		return "player " + (heroIndex + 1);
+	}
+
+	/**
+	 * Whether this client's player may give the hero an order now. Only a strict turn of another
+	 * hero refuses: while an enemy is in sight and the simulation waits for someone else's
+	 * decision, a tap would otherwise fire later, during the player's own turn, as a surprise.
+	 * A hero already walking may still be redirected.
+	 */
+	public static boolean mayOrder( Hero hero ){
+		if (!enabled || hero == null) return true;
+		if (!waitingStrict || waitingHero < 0 || waitingHero == indexOf( hero )) return true;
+		return hero.isBusy();
+	}
+
+	/** Feedback for an order refused by {@link #mayOrder}. */
+	public static void refuseOrder(){
+		GLog.w( "Not your turn: " + nameOf( waitingHero ) + " is deciding." );
+		Hero local = Dungeon.localHero();
+		if (local != null && local.sprite != null) local.sprite.showStatus( CharSprite.WARNING, "not your turn" );
 	}
 
 	/** Asks the hosting page to leave the game (back to the lobby). */
@@ -140,30 +189,49 @@ public class Coop {
 		public final long seq;
 		public final String type;
 		public final String payload;
+		/** Index of the hero the entry is for (the sender's hero, or the hero named by a skip). */
+		public final int hero;
+		boolean consumed = false;
 
-		Action( String uid, long seq, String type, String payload ) {
+		Action( String uid, long seq, String type, String payload, int hero ) {
 			this.uid = uid;
 			this.seq = seq;
 			this.type = type;
 			this.payload = payload;
+			this.hero = hero;
 		}
 	}
 
-	private static final HashMap<Integer, ArrayDeque<Action>> queues = new HashMap<>();
+	/** Verdicts of {@link #next(Hero)} besides an entry to apply. */
+	public static final Action WAIT = new Action( "", -1, "wait", "", -1 );
+	public static final Action CONTINUE = new Action( "", -1, "continue", "", -1 );
+	public static final Action PASS = new Action( "", -1, "pass", "", -1 );
+
+	//every order received, in seq order (the page delivers them contiguously)
+	private static final ArrayList<Action> log = new ArrayList<>();
+	//index of the first entry not consumed yet
+	private static int cursor = 0;
 	private static long lastSeq = -1;
-	//checksums of our applied actions, and the ones other clients reported, by seq
+	//applied entries and passes so far (identical on every client); every CHECK_EVERY-th one
+	//sends a checksum, keyed by this count
+	private static int applies = 0;
+	private static final int CHECK_EVERY = 4;
+	//checksums of our applied actions, and the ones other clients reported, by apply count
 	private static final HashMap<Long, Long> applied = new HashMap<>();
 	private static final HashMap<Long, Long> reported = new HashMap<>();
 
 	public static void reset(){
 		enabled = false;
 		localPlayer = null;
-		announcedTurn = null;
+		announced = null;
 		epochs.clear();
-		settledSeq = -1;
 		players.clear();
-		synchronized (queues) { queues.clear(); }
+		names.clear();
+		waitingHero = -1;
+		waitingStrict = false;
+		synchronized (log) { log.clear(); cursor = 0; }
 		lastSeq = -1;
+		applies = 0;
 		applied.clear();
 		reported.clear();
 		desynced = false;
@@ -203,7 +271,7 @@ public class Coop {
 	 */
 	public static void handleCell( Hero hero, int cell ){
 		if (enabled && !applying) {
-			if (isLocal( hero )) submitCell( cell );
+			if (isLocal( hero ) && allowed( hero )) submitCell( cell );
 			return;
 		}
 		if (hero.handle( cell )) hero.next();
@@ -212,7 +280,7 @@ public class Coop {
 	/** Resume an interrupted path (the resume indicator). */
 	public static void resume( Hero hero ){
 		if (enabled && !applying) {
-			if (isLocal( hero )) submit( "resume", "" );
+			if (isLocal( hero ) && allowed( hero )) submit( "resume", "" );
 			return;
 		}
 		hero.resume();
@@ -221,7 +289,7 @@ public class Coop {
 	/** The toolbar's wait/pick-up button: pick up what is here, otherwise rest a turn. */
 	public static void waitOrPickup( Hero hero ){
 		if (enabled && !applying) {
-			if (isLocal( hero )) submit( "wait", "" );
+			if (isLocal( hero ) && allowed( hero )) submit( "wait", "" );
 			return;
 		}
 		applyWait( hero );
@@ -248,11 +316,18 @@ public class Coop {
 	}
 
 	public static void submitRest( boolean full ){
-		submit( "rest", full ? "1" : "0" );
+		if (allowed( Dungeon.localHero() )) submit( "rest", full ? "1" : "0" );
 	}
 
 	public static void submitSearch(){
-		submit( "search", "" );
+		if (allowed( Dungeon.localHero() )) submit( "search", "" );
+	}
+
+	//a player's own order is refused with feedback during somebody else's strict turn
+	private static boolean allowed( Hero hero ){
+		if (mayOrder( hero )) return true;
+		refuseOrder();
+		return false;
 	}
 
 	public static void submitItem( Hero hero, Item item, String action ){
@@ -272,7 +347,7 @@ public class Coop {
 	 */
 	public static void useItem( Hero hero, Item item, String action ){
 		if (enabled && !applying) {
-			submitItem( hero, item, action == null ? item.defaultAction() : action );
+			if (allowed( hero )) submitItem( hero, item, action == null ? item.defaultAction() : action );
 			return;
 		}
 		if (action == null) item.execute( hero ); else item.execute( hero, action );
@@ -297,7 +372,7 @@ public class Coop {
 
 	/**
 	 * Called from the JS message callback. Must not block or touch the simulation: it only
-	 * queues the action and releases the actor thread if that hero is waiting for input.
+	 * appends the entry to the log and releases the actor thread if a hero is parked on the log.
 	 */
 	public static void receive( String flat ){
 		String[] parts = flat.split( "\t", 4 );
@@ -315,7 +390,7 @@ public class Coop {
 
 		int heroIndex;
 		if ("skip".equals( parts[2] )) {
-			//a skip is sent by another player on behalf of the hero named in the payload
+			//a skip names the hero in its payload, whoever wrote it
 			int colon = parts[3].indexOf( ':' );
 			try {
 				heroIndex = Integer.parseInt( colon < 0 ? parts[3] : parts[3].substring( 0, colon ) );
@@ -327,66 +402,126 @@ public class Coop {
 		}
 		if (heroIndex < 0 || heroIndex >= players.size()) return;
 
-		Action action = new Action( uid, seq, parts[2], parts[3] );
-		synchronized (queues) {
-			ArrayDeque<Action> queue = queues.get( heroIndex );
-			if (queue == null) queues.put( heroIndex, queue = new ArrayDeque<>() );
-			//no coalescing here: which orders are present at a given moment depends on
-			//delivery timing, so the queue must contain every order and be consumed in log order
-			queue.add( action );
+		synchronized (log) {
+			log.add( new Action( uid, seq, parts[2], parts[3], heroIndex ) );
 		}
 
-		//the owner's hero may be parked in act() waiting for exactly this
-		if (heroIndex < Dungeon.heroes.size()) {
-			Hero hero = Dungeon.heroes.get( heroIndex );
-			if (hero.ready && Actor.processing()) {
-				hero.next();
+		//a hero may be parked in act() waiting for exactly this
+		Actor acting = Actor.current();
+		if (acting instanceof Hero && ((Hero) acting).awaitingLog) {
+			acting.next();
+		}
+	}
+
+	/** Whether this client's player may tap the map at all (the turn check is in mayOrder). */
+	public static boolean canOrder( Hero hero ){
+		if (hero == null) return false;
+		return enabled ? hero.isAlive() : hero.ready;
+	}
+
+	/** True while a selector opened by an applied order waits for its answer through the log. */
+	public static boolean promptParked(){
+		return proxiedCellListener != null || proxiedItemSelector != null;
+	}
+
+	private static int epochOf( Action skip ){
+		int colon = skip.payload.indexOf( ':' );
+		try {
+			return colon < 0 ? -1 : Integer.parseInt( skip.payload.substring( colon + 1 ) );
+		} catch (NumberFormatException e) {
+			return -1;
+		}
+	}
+
+	//consumed entries and entries of dead heroes are skipped over
+	private static void advanceCursor(){
+		while (cursor < log.size()) {
+			Action a = log.get( cursor );
+			if (!a.consumed && a.hero < Dungeon.heroes.size() && Dungeon.heroes.get( a.hero ).isAlive()) break;
+			a.consumed = true;
+			cursor++;
+		}
+	}
+
+	/**
+	 * The decision for a hero at the start of its act(). Called on the actor thread only.
+	 * Returns an entry to apply, or WAIT (park until the log grows), CONTINUE (carry on with
+	 * the action in progress) or PASS (an idle hero lets a turn go by while others move).
+	 * Every branch reads the log only at positions the simulation waits for, so all clients
+	 * decide the same whatever the delivery timing.
+	 */
+	public static Action next( Hero hero ){
+		int me = indexOf( hero );
+		boolean busy = hero.isBusy();
+		boolean strict = !busy && partySeesEnemy();
+		synchronized (log) {
+			while (true) {
+				advanceCursor();
+				if (!strict) {
+					if (cursor >= log.size()) return park( me, false );
+					Action a = log.get( cursor );
+					if (a.hero != me) {
+						waitingHero = -1;
+						return busy ? CONTINUE : PASS;
+					}
+					a.consumed = true;
+					if ("skip".equals( a.type ) && epochOf( a ) != epoch( hero )) continue; //stale, dropped
+					waitingHero = -1;
+					return a;
+				} else {
+					for (int i = cursor; i < log.size(); i++) {
+						Action a = log.get( i );
+						if (a.consumed || a.hero != me) continue;
+						a.consumed = true;
+						if ("skip".equals( a.type ) && epochOf( a ) != epoch( hero )) continue;
+						waitingHero = -1;
+						return a;
+					}
+					return park( me, true );
+				}
 			}
 		}
 	}
 
-	/**
-	 * Whether this client's player may give the hero an order right now: the hero waits for
-	 * input, or (co-op) it is walking a path that a new tap may redirect, like a tap does in the
-	 * single player game.
-	 */
-	public static boolean canOrder( Hero hero ){
-		if (hero == null) return false;
-		return hero.ready || (enabled && !hero.resting && hero.curAction instanceof HeroAction.Move);
+	private static Action park( int hero, boolean strict ){
+		waitingHero = hero;
+		waitingStrict = strict;
+		return WAIT;
 	}
 
-	//highest seq of an order taken by a hero that had nothing to do (a point where the
-	//simulation waits for the log). Orders are delivered in seq order, so every client that
-	//reaches that simulation point has received everything up to settledSeq.
-	private static long settledSeq = -1;
-
-	/** Called when a hero with nothing to do took an order from its queue. */
-	public static void settled( Action action ){
-		if (action.seq > settledSeq) settledSeq = action.seq;
-	}
-
-	/**
-	 * True when a walking hero may replace its walk with the next queued cell order. Only
-	 * orders no newer than settledSeq qualify: a walking hero does not wait for the log, so
-	 * consulting anything newer would depend on delivery timing and diverge between clients.
-	 */
-	public static boolean redirectAvailable( Hero hero ){
-		synchronized (queues) {
-			ArrayDeque<Action> queue = queues.get( indexOf( hero ) );
-			Action next = queue == null ? null : queue.peek();
-			return next != null && "cell".equals( next.type ) && next.seq <= settledSeq;
+	/** A paralysed hero cannot take orders: its entries at the front of the log are dropped. */
+	public static void dropOrders( Hero hero ){
+		int me = indexOf( hero );
+		synchronized (log) {
+			advanceCursor();
+			while (cursor < log.size() && log.get( cursor ).hero == me) {
+				log.get( cursor ).consumed = true;
+				cursor++;
+			}
 		}
 	}
 
-	/** Next queued action for the hero, or null. Called from the actor thread only. */
-	public static Action poll( Hero hero ){
-		synchronized (queues) {
-			ArrayDeque<Action> queue = queues.get( indexOf( hero ) );
-			return queue == null ? null : queue.poll();
-		}
+	/** An idle hero lets a turn pass (PASS verdict). Counts like an applied entry. */
+	public static void pass( Hero hero ){
+		hero.pass();
+		finishApply( hero, "pass", "" );
 	}
 
-	/** Turns a queued action into hero state, exactly like local input would. */
+	private static void finishApply( Hero hero, String type, String detail ){
+		epochs.put( indexOf( hero ), epoch( hero ) + 1 );
+		applies++;
+		if (applies % CHECK_EVERY != 0) return;
+		long sum = checksum();
+		applied.put( (long) applies, sum );
+		Gdx.app.log( "coop", "applied #" + applies + " " + type + " " + detail
+				+ " hero=" + indexOf( hero ) + " checksum=" + Long.toHexString( sum ) + " " + checksumDetail() );
+		Long expected = reported.remove( (long) applies );
+		if (expected != null && expected != sum) flagDesync( applies );
+		//the detail travels too, so a mismatch can be diagnosed from the room's log alone
+		submit( "check", applies + ":" + Long.toHexString( sum ) + "|" + checksumDetail() );
+	}
+
+	/** Turns a log entry into hero state, exactly like local input would. */
 	public static boolean apply( Hero hero, Action action ){
 		applying = true;
 		boolean result = false;
@@ -436,16 +571,12 @@ public class Coop {
 					applyWait( hero );
 					result = true;
 					break;
-				case "skip": {
-					//"hero:epoch", sent by another player: valid only for the turn they saw
-					int colon = action.payload.indexOf( ':' );
-					int epoch = colon < 0 ? -1 : Integer.parseInt( action.payload.substring( colon + 1 ) );
-					if (epoch == epoch( hero )) {
-						hero.rest( false );
-						result = true;
-					}
+				case "skip":
+					//"nothing new": a busy hero carries on, an idle one lets the turn pass
+					//(stale epochs were dropped by next())
+					if (!hero.isBusy()) hero.pass();
+					result = true;
 					break;
-				}
 				default:
 					GLog.w( "unknown co-op action: " + action.type );
 			}
@@ -453,15 +584,7 @@ public class Coop {
 			result = false;
 		} finally {
 			applying = false;
-			epochs.put( indexOf( hero ), epoch( hero ) + 1 );
-			long sum = checksum();
-			applied.put( action.seq, sum );
-			Gdx.app.log( "coop", "applied seq=" + action.seq + " " + action.type + " " + action.payload
-					+ " hero=" + indexOf( hero ) + " checksum=" + Long.toHexString( sum ) + " " + checksumDetail() );
-			Long expected = reported.remove( action.seq );
-			if (expected != null && expected != sum) flagDesync( action.seq );
-			//the detail travels too, so a mismatch can be diagnosed from the room's log alone
-			submit( "check", action.seq + ":" + Long.toHexString( sum ) + "|" + checksumDetail() );
+			finishApply( hero, action.type, "seq=" + action.seq + " " + action.payload );
 		}
 		return result;
 	}
@@ -503,11 +626,11 @@ public class Coop {
 		}
 	}
 
-	private static void flagDesync( long seq ){
+	private static void flagDesync( long count ){
 		if (desynced) return;
 		desynced = true;
-		Gdx.app.error( "coop", "desync detected at seq " + seq );
-		GLog.n( "Out of sync with the other players (action " + seq + "). Reload the page to catch up." );
+		Gdx.app.error( "coop", "desync detected at apply #" + count );
+		GLog.n( "Out of sync with the other players (action " + count + "). Reload the page to catch up." );
 	}
 
 	// ---- item paths: a stable address of an item inside a hero's belongings ----

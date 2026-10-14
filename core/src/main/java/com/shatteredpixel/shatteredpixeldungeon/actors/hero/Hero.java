@@ -861,27 +861,39 @@ public class Hero extends Char {
 		if (paralysed > 0) {
 			
 			curAction = null;
+			if (Coop.enabled) Coop.dropOrders( this );
 			
 			spendAndNext( TICK );
 			return false;
 		}
 		
-		//co-op: a hero with nothing to do takes the next action its player sent, if any. A new
-		//cell order also replaces a walk in progress (a tap redirects the hero in single player).
-		if (Coop.enabled && !resting
-				&& (curAction == null || (curAction instanceof HeroAction.Move && Coop.redirectAvailable( this )))) {
-			boolean idle = curAction == null;
-			Coop.Action queued = Coop.poll( this );
-			if (queued != null) {
-				//an idle hero waits for the log, so this order is known to every client by now
-				if (idle) Coop.settled( queued );
-				Coop.apply( this, queued );
-				if (curAction == null && !resting) {
-					//an instant action (item, selector answer, search): any time it took was spent
-					//inside apply. Stay ready for the next queued action without resetting the
-					//selectors an item may just have opened.
-					ready = true;
-					Coop.announceTurn( this );
+		//co-op: what the log says for this hero, see Coop.next. Wait for it, carry on with the
+		//action in progress, let the turn pass, or apply an entry (a tap redirects a walk like
+		//in single player). An instant entry (item, selector answer) is followed by another look.
+		if (Coop.enabled) {
+			while (true) {
+				Coop.Action order = Coop.next( this );
+				if (order == Coop.WAIT) {
+					//set first: ready() must not wake the actor thread for a hero parked on the log
+					awaitingLog = true;
+					if (curAction == null && !resting && !ready) {
+						//stay ready without resetting a selector an item may just have opened
+						if (Coop.promptParked()) ready = true; else ready();
+					}
+					Coop.announce( this, true );
+					return false;
+				}
+				awaitingLog = false;
+				if (order == Coop.CONTINUE) break;
+				if (order == Coop.PASS) {
+					Coop.pass( this );
+					return false;
+				}
+				Coop.apply( this, order );
+				if (curAction != null || resting) break;
+				//an instant action that took time: let the others act before looking again
+				if (cooldown() > 0) {
+					next();
 					return false;
 				}
 			}
@@ -949,7 +961,34 @@ public class Hero extends Char {
 			}
 		}
 		
+		if (Coop.enabled && actResult && (curAction != null || resting)) Coop.announce( this, false );
+		
 		return actResult;
+	}
+	
+	/** Co-op: set while act() is parked waiting for the log; a new entry wakes the actor thread. */
+	public boolean awaitingLog = false;
+	
+	/** Co-op: an idle hero lets a turn go by while the others move (no status text, no search). */
+	public void pass() {
+		spendAndNextConstant( TIME_TO_REST );
+		resting = false;
+	}
+	
+	/**
+	 * Co-op: whether the hero has something to do at its next act(): a walk or another action
+	 * in progress, or resting. A walk that already reached its cell is over (act() would only
+	 * end it), so it does not count.
+	 */
+	public boolean isBusy() {
+		if (resting) return true;
+		if (curAction == null) return false;
+		return !(curAction instanceof HeroAction.Move && curAction.dst == pos);
+	}
+	
+	/** Whether this hero had an enemy in sight when it last looked (simulation state). */
+	public boolean seesEnemy() {
+		return visibleEnemies != null && !visibleEnemies.isEmpty();
 	}
 	
 	public void busy() {
@@ -971,7 +1010,9 @@ public class Hero extends Char {
 		//co-op: a remote hero becoming ready must not reset this client's selectors (a parked
 		//target prompt of the local hero, for instance)
 		if (!Coop.enabled || Coop.isLocal( this )) GameScene.ready();
-		Coop.announceTurn( this );
+		//co-op: an action that ended does not park the actor thread until input arrives (single
+		//player does); the hero looks at the log again at once and parks there if it is empty
+		if (Coop.enabled && !awaitingLog) next();
 		//check statistics to see if vault warned?
 		//or just used shared prefs?
 		if (Dungeon.level instanceof VaultLevel
@@ -1872,6 +1913,8 @@ public class Hero extends Char {
 		} else {
 
 			boolean newPath = false;
+			//co-op: a party member stepped onto the path; a longer way round must not end the walk
+			boolean partyBlock = false;
 			if (path == null || path.isEmpty() || !Dungeon.level.adjacent(pos, path.getFirst()))
 				newPath = true;
 			else if (path.getLast() != target)
@@ -1879,6 +1922,7 @@ public class Hero extends Char {
 			else {
 				if (!Dungeon.level.passable[path.get(0)] || Actor.findChar(path.get(0)) != null) {
 					newPath = true;
+					partyBlock = Actor.findChar(path.get(0)) instanceof Hero;
 				}
 			}
 
@@ -1894,11 +1938,16 @@ public class Hero extends Char {
 				}
 
 				PathFinder.Path newpath = Dungeon.findPath(this, target, passable, fieldOfView, true);
-				//co-op: no way around a party member (a corridor, a doorway): go through them
-				if (newpath == null && Dungeon.heroes.size() > 1) {
-					newpath = Dungeon.findPathThroughParty(this, target, passable, fieldOfView);
+				//co-op: a short detour around a party member is fine, a long one (or none: a
+				//corridor, a doorway) means going through them, see the swap below
+				if (Dungeon.heroes.size() > 1) {
+					PathFinder.Path through = Dungeon.findPathThroughParty(this, target, passable, fieldOfView);
+					if (through != null && (newpath == null || newpath.size() > through.size() + 2)) {
+						newpath = through;
+						partyBlock = true;
+					}
 				}
-				if (newpath != null && path != null && newpath.size() > 2*path.size()){
+				if (newpath != null && path != null && !partyBlock && newpath.size() > 2*path.size()){
 					path = null;
 				} else {
 					path = newpath;
@@ -2023,11 +2072,6 @@ public class Hero extends Char {
 			} else {
 				curAction = new HeroAction.Attack( ch );
 			}
-
-		//co-op: another hero is a party member, tapping them swaps places like with an ally
-		} else if (ch instanceof Hero && ch != this && fieldOfView[cell]) {
-
-			curAction = new HeroAction.Interact( ch );
 
 		//TODO perhaps only trigger this if hero is already adjacent? reducing mistaps
 		} else if (Dungeon.level instanceof MiningLevel &&

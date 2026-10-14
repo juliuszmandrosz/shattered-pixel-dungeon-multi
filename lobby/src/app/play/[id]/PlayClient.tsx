@@ -17,7 +17,9 @@ import { Button, HERO_LABEL, HeroSprite } from "@/components/pd";
  *                  -> postMessage({ spd: "action", uid, seq, type, payload }) into the iframe
  * The server-assigned seq is what keeps every client's numbering identical; delivery order of
  * child_added differs between clients (own writes show up first), so it cannot be used.
- * The game also posts { spd: "turn", hero } for the turn HUD and { spd: "leave" } for "Main menu".
+ * The game also posts { spd: "turn", hero, epoch, danger, waiting, states } whenever the
+ * simulation looks at the log for a hero (turn HUD, and the "skip" entries this page writes, see
+ * the turn policy below) and { spd: "leave" } for "Main menu".
  * Every client replays the whole stream from the start (rooms always begin a fresh run), so a
  * reload is also the resync path: "Resync" reloads the iframe and replays the log.
  */
@@ -34,11 +36,14 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
   const [gameReady, setGameReady] = useState(false);
   // bumping this reloads the iframe, which replays the action log from the start
   const [generation, setGeneration] = useState(0);
-  // the hero waiting for input, from the game: index in player order, its order count (epoch,
-  // identical on every client) and whether the party sees an enemy
-  const [turn, setTurn] = useState<{ hero: number; epoch: number; danger: boolean } | null>(null);
-  // seconds the waited-for player has had this turn (drives the skip timer and countdown)
+  // where the simulation stands, from the game: the hero whose act() is next (index in player
+  // order), its order count (epoch, identical on every client), whether an enemy is in sight,
+  // whether the game is parked on that hero right now, and every hero's state
+  const [turn, setTurn] = useState<Turn | null>(null);
+  // seconds since the current (hero, epoch) was first announced (strict-turn countdown)
   const [waited, setWaited] = useState(0);
+  const turnStart = useRef<{ key: string; at: number } | null>(null);
+  const sentSkip = useRef<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -122,10 +127,15 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
         case "turn":
           setTurn(
             typeof data.hero === "number"
-              ? { hero: data.hero, epoch: Number(data.epoch ?? 0), danger: Boolean(data.danger) }
+              ? {
+                  hero: data.hero,
+                  epoch: Number(data.epoch ?? 0),
+                  danger: Boolean(data.danger),
+                  waiting: Boolean(data.waiting),
+                  states: Array.isArray(data.states) ? data.states.map(String) : [],
+                }
               : null,
           );
-          setWaited(0);
           return;
         case "leave":
           router.push("/");
@@ -140,29 +150,50 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
     return () => window.removeEventListener("message", onMessage);
   }, [user, router, sendAction]);
 
-  // skip timer: when the game waits for somebody else, every other client counts and, after
-  // the limit, appends a "skip" order for that hero and turn. The game accepts the first skip
-  // whose epoch still matches and drops the rest, so several clients may send one safely.
-  // player order of the fixed party; the local index decides whose skip timer this client runs
+  // player order of the fixed party; the local index decides which hero is "mine"
   const order = useMemo(
     () => (players ? Object.entries(players).sort((a, b) => a[1].order - b[1].order).map(([uid]) => uid) : []),
     [players],
   );
+  // turn policy: the game consumes one log entry per hero step, so somebody has to write
+  // "nothing new" (skip hero:epoch) whenever a hero is busy walking or resting, and for an idle
+  // hero while others move and no enemy is in sight (it lets the turn pass). The owner writes it
+  // at once; the other clients after a short delay, in case the owner is absent (duplicates are
+  // dropped by the game, the epoch no longer matches). A strict turn (idle hero, enemy in sight)
+  // is only skipped after a long timeout, or by the countdown button.
   useEffect(() => {
     if (!turn || !gameReady || !user) return;
-    if (turn.hero === order.indexOf(user.uid)) return;
-    const limit = turn.danger ? SKIP_SECONDS_DANGER : SKIP_SECONDS;
-    const started = Date.now();
-    let fired = false;
-    const id = setInterval(() => {
-      const s = Math.floor((Date.now() - started) / 1000);
-      setWaited(s);
-      if (!fired && s >= limit) {
-        fired = true;
-        void sendAction("skip", `${turn.hero}:${turn.epoch}`);
-      }
-    }, 500);
-    return () => clearInterval(id);
+    const key = `${turn.hero}:${turn.epoch}`;
+    if (turnStart.current?.key !== key) turnStart.current = { key, at: Date.now() };
+    const started = turnStart.current.at;
+    const myIndex = order.indexOf(user.uid);
+    const mine = turn.hero === myIndex;
+    const busy = turn.states[turn.hero] === "walk" || turn.states[turn.hero] === "rest";
+    const othersBusy = turn.states.some((s, i) => i !== turn.hero && (s === "walk" || s === "rest"));
+    const strict = !busy && turn.danger;
+    let delay: number | null = null;
+    if (!strict && (busy || othersBusy)) {
+      delay = mine ? 0 : AFK_MS + AFK_STAGGER_MS * ((myIndex - turn.hero + order.length) % order.length);
+    } else if (strict && !mine) {
+      delay = SKIP_SECONDS_DANGER * 1000;
+    }
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    if (delay !== null) {
+      timer = setTimeout(
+        () => {
+          if (sentSkip.current === key) return;
+          sentSkip.current = key;
+          void sendAction("skip", key);
+        },
+        Math.max(0, delay - (Date.now() - started)),
+      );
+    }
+    setWaited(Math.floor((Date.now() - started) / 1000));
+    const ticker = strict ? setInterval(() => setWaited(Math.floor((Date.now() - started) / 1000)), 500) : null;
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (ticker) clearInterval(ticker);
+    };
   }, [turn, gameReady, sendAction, order, user]);
 
   function skipNow() {
@@ -191,6 +222,8 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
     heroClass: players[user.uid]?.heroClass ?? "WARRIOR",
     // every member's class in player order; the game creates the whole party
     party: order.map((uid) => players[uid]?.heroClass ?? "WARRIOR").join(","),
+    // display names for in-game messages ("Not your turn: X is deciding")
+    names: order.map((uid) => (players[uid]?.name ?? "?").replace(/,/g, " ")).join(","),
     v: String(generation),
   });
 
@@ -214,89 +247,113 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
           className="h-full w-full border-0"
           allow="autoplay; fullscreen; gamepad"
         />
-        <TurnOrder
-          order={order}
-          players={players}
-          turnHero={turn?.hero ?? null}
-          me={user.uid}
-          waited={waited}
-          limit={turn ? (turn.danger ? SKIP_SECONDS_DANGER : SKIP_SECONDS) : 0}
-          onSkip={skipNow}
-        />
+        <TurnOrder order={order} players={players} turn={turn} me={user.uid} waited={waited} onSkip={skipNow} />
       </div>
     </main>
   );
 }
 
+type Turn = { hero: number; epoch: number; danger: boolean; waiting: boolean; states: string[] };
+
 const ROW = 44;
-// seconds another player may keep everyone waiting before their hero waits a turn (the story
-// screen and badge popups at the start count too, so not too short)
-const SKIP_SECONDS = 30;
+// seconds a player may keep everyone waiting on a strict turn (enemy in sight) before the
+// other clients make their hero wait a turn
 const SKIP_SECONDS_DANGER = 45;
 // the countdown is only shown for the last seconds, a timer on every turn feels like pressure
 const COUNTDOWN_SECONDS = 10;
+// how long the other clients give a hero's owner to write its own "nothing new" entry before
+// writing it for them (absent or hidden tab), staggered by player order
+const AFK_MS = 700;
+const AFK_STAGGER_MS = 300;
 // a missing seq older than this is treated as abandoned and filled with a void entry
 const GAP_SECONDS = 6;
 
+const STATE_LABEL: Record<string, string> = { walk: "walking", rest: "resting", idle: "", dead: "dead" };
+
 /**
- * Turn order HUD on the left (below the game's own status pane): the hero waiting for input is
- * on top, the others follow in the order they will act. When a turn passes, the previous hero
- * slides to the bottom.
+ * Party HUD on the left (below the game's own status pane). While exploring, nobody waits for
+ * anybody: rows keep the player order and show who is walking. While an enemy is in sight,
+ * turns are strict: the hero whose decision the game waits for is on top and marked, the
+ * player's own turn gets a banner, and the others see a countdown for the last seconds.
  */
 function TurnOrder({
   order,
   players,
-  turnHero,
+  turn,
   me,
   waited,
-  limit,
   onSkip,
 }: {
   order: string[];
   players: Record<string, RoomPlayer>;
-  turnHero: number | null;
+  turn: Turn | null;
   me: string;
   waited: number;
-  limit: number;
   onSkip: () => void;
 }) {
-  const start = turnHero ?? 0;
+  const heroState = (i: number) => turn?.states[i] ?? "idle";
+  const strict = !!turn && turn.danger && heroState(turn.hero) === "idle";
+  const start = strict ? turn!.hero : 0;
   const position = new Map<string, number>();
   order.forEach((uid, i) => position.set(uid, (i - start + order.length) % order.length));
-  const myTurn = turnHero !== null && order[turnHero] === me;
+  const myTurn = strict && order[turn!.hero] === me;
+  const remaining = Math.max(0, SKIP_SECONDS_DANGER - waited);
   return (
-    <div className="pointer-events-none absolute left-3 select-none" style={{ top: "28%", height: order.length * ROW, width: 172 }}>
-      {order.map((uid) => {
-        const p = players[uid];
-        const pos = position.get(uid) ?? 0;
-        const active = turnHero !== null && pos === 0;
-        return (
-          <div
-            key={uid}
-            className={`pd-window absolute left-0 flex items-center gap-2 px-2 py-1 transition-all duration-500 ease-in-out ${
-              active ? "opacity-100" : "opacity-70"
-            }`}
-            style={{ top: pos * ROW, transform: active ? "translateX(6px) scale(1.04)" : "none", width: 160 }}
-          >
-            <HeroSprite heroClass={p?.heroClass ?? "WARRIOR"} className="!h-[15px] !w-[12px]" />
-            <div className="min-w-0 flex-1 leading-tight">
-              <div className={`truncate text-xs ${uid === me ? "pd-positive" : ""}`}>{p?.name ?? "?"}</div>
-              <div className="pd-muted text-[10px]">{HERO_LABEL[p?.heroClass ?? "WARRIOR"]}</div>
+    <>
+      {strict && (
+        <div className="pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 select-none">
+          {myTurn ? (
+            <div className="pd-window pd-positive pd-blink px-4 py-1 text-base">YOUR TURN</div>
+          ) : (
+            <div className="pd-window pd-muted px-3 py-1 text-xs">
+              Waiting for <span className="pd-warning">{players[order[turn!.hero]]?.name ?? "?"}</span>
             </div>
-            {active && myTurn && <span className="pd-positive pd-blink text-[10px]">YOU</span>}
-            {active && !myTurn && limit > 0 && limit - waited <= COUNTDOWN_SECONDS && (
-              <button
-                type="button"
-                onClick={onSkip}
-                title="Make this hero wait a turn now"
-                className="pd-btn pd-btn-grey pointer-events-auto px-1 text-[10px]"
+          )}
+        </div>
+      )}
+      <div className="pointer-events-none absolute left-3 select-none" style={{ top: "28%", height: order.length * ROW + 18, width: 172 }}>
+        <div className={`mb-1 text-[10px] ${turn?.danger ? "pd-negative" : "pd-muted"}`}>
+          {turn ? (turn.danger ? "COMBAT: turns" : "EXPLORING: move freely") : ""}
+        </div>
+        <div className="relative" style={{ height: order.length * ROW }}>
+          {order.map((uid, i) => {
+            const p = players[uid];
+            const pos = position.get(uid) ?? 0;
+            const active = strict && pos === 0;
+            const state = heroState(i);
+            return (
+              <div
+                key={uid}
+                className={`pd-window absolute left-0 flex items-center gap-2 px-2 py-1 transition-all duration-500 ease-in-out ${
+                  active ? "opacity-100" : strict ? "opacity-60" : "opacity-85"
+                }`}
+                style={{ top: pos * ROW, transform: active ? "translateX(6px) scale(1.04)" : "none", width: 160 }}
               >
-                {`${Math.max(0, limit - waited)}s`}
-              </button>
-            )}
-          </div>
-        );
-      })}
-    </div>
+                <HeroSprite heroClass={p?.heroClass ?? "WARRIOR"} className="!h-[15px] !w-[12px]" />
+                <div className="min-w-0 flex-1 leading-tight">
+                  <div className={`truncate text-xs ${uid === me ? "pd-positive" : ""}`}>{p?.name ?? "?"}</div>
+                  <div className="pd-muted text-[10px]">
+                    {HERO_LABEL[p?.heroClass ?? "WARRIOR"]}
+                    {STATE_LABEL[state] ? ` · ${STATE_LABEL[state]}` : ""}
+                  </div>
+                </div>
+                {active && myTurn && <span className="pd-positive pd-blink text-[10px]">YOU</span>}
+                {active && !myTurn && remaining > COUNTDOWN_SECONDS && <span className="pd-warning text-[10px]">turn</span>}
+                {active && !myTurn && remaining <= COUNTDOWN_SECONDS && (
+                  <button
+                    type="button"
+                    onClick={onSkip}
+                    title="Make this hero wait a turn now"
+                    className="pd-btn pd-btn-grey pointer-events-auto px-1 text-[10px]"
+                  >
+                    {`${remaining}s`}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
   );
 }

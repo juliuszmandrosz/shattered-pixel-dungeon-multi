@@ -67,11 +67,10 @@ in-page relay in `lobby/public/test/coop.html`) and every client receives
 `{spd:"action", uid, seq, type, payload}`. `seq` must come from one place for everyone: the lobby
 takes it from a transaction on `rooms/{room}/nextSeq` and delivers actions strictly in `seq`
 order (the order in which Realtime Database raises `child_added` differs between clients, a
-client sees its own writes first). The game also posts `{spd:"turn", hero}` whenever a hero
-starts waiting for input (the lobby's turn order HUD) and `{spd:"leave"}` when "Main menu" is
-pressed inside a room. `Coop` queues the action for the hero that belongs
-to `uid` and applies it when that hero's `act()` runs with nothing to do, so all clients apply
-it at the same point of the simulation. Selectors opened by the simulation (wand target, item
+client sees its own writes first). The game also posts `{spd:"turn", ...}` whenever it looks
+at the log for a hero (the lobby's turn HUD and skip policy) and `{spd:"leave"}` when "Main
+menu" is pressed inside a room. `Coop` appends the entry to its log and the hero it belongs
+to consumes it in `act()`, so all clients apply it at the same point of the simulation. Selectors opened by the simulation (wand target, item
 to read a scroll on) are parked, the owner answers them through the queue and every client
 resolves the parked selector with the same answer. Each applied action logs a state checksum
 (`coop: applied seq=… checksum=… now=… rng=…`) and sends it as a `check` message; a client whose
@@ -94,25 +93,39 @@ which rebases every actor's time on that client only, and the web backend saves 
 is hidden (pause), so a player switching tabs would desync `now` for everyone else.
 
 **The log invariant.** A simulation decision may consult the log only at a point where it
-waits for the log. A hero with nothing to do waits for its next order, so when it proceeds,
-every client that reaches that point has received every entry up to that order's seq
-(`Coop.settledSeq`). A walking hero does not wait, so it may only act on orders with
-seq <= settledSeq: a tap redirects a walk one round late, but identically everywhere. Orders
-are never coalesced or reordered on receipt for the same reason.
+waits for the log. `Coop.next(hero)` is the single place a hero looks: entries sit in one
+log in seq order with a cursor on the first unconsumed one. A hero with something to do (a
+walk, resting) needs the entry at the cursor before every step: its own entry redirects or
+confirms it (a `skip` is "nothing new", the page writes them, see below), a foreign one lets it
+carry on, no entry parks it. An idle hero while nobody sees an enemy takes its own entry at the
+cursor, or lets a turn pass (`Hero.pass`) when the cursor holds somebody else's entry, so
+players explore without waiting for each other, like in single player. An idle hero while an
+enemy is in sight (`Hero.seesEnemy` of any living hero, simulation state) waits for its own
+next entry wherever it is in the log: a strict turn, and during it the other players' taps are
+refused with feedback (`Coop.mayOrder`). Whether an entry arrived before or after a step
+never matters, every branch reads the log at a position it would wait for. Orders are never
+coalesced or reordered on receipt.
 
-**Skipping a turn.** When the game waits for a player, the other clients count; after
-20 s (45 s while the party sees an enemy) they append `skip` with payload `hero:epoch`, and a
-button in the HUD does it at once. `epoch` is the number of orders applied for that hero (log
-order, identical everywhere) carried in the `turn` message; the game applies a skip only if the
-epoch still matches, so duplicates and late skips are dropped the same way on every client.
-A skip makes the hero wait one turn (`rest(false)`).
+**Who writes the skips.** The game posts `{spd:"turn", hero, epoch, danger, waiting, states}`
+whenever it looks at the log for a hero (and right after a step, so the next entry is on its
+way during the animation). The page writes `skip hero:epoch` at once for its own hero when it
+is busy, or idle while others move with no enemy in sight; the other clients write it after
+`AFK_MS` (staggered by player order) in case the owner's tab is gone; a strict turn is skipped
+only after `SKIP_SECONDS_DANGER` or by the countdown button. `epoch` is the number of entries
+applied (and passes) for that hero, identical everywhere, so duplicates and late skips are
+dropped the same way on every client. Checksums travel every fourth apply, keyed by the apply
+count.
 
 **Party members never block.** Corridors are one tile wide, so a hero standing in a doorway
 would make every order of the hero behind it a silent no-op (`getCloser` found no path, no
 time passed; this was the "I click and nothing happens" report). `Dungeon.findPassable` lets a
-hero's path run through other heroes and `Hero.getCloser` swaps places with a hero standing on
-the next step, exactly like the ally swap in `Char.interact`; tapping a party member swaps too
-(`Hero.handle` -> `HeroAction.Interact`).
+hero's path run through other heroes when the way round is more than two steps longer (or
+there is none), `Hero.getCloser` swaps places with a hero standing on the next step or coming
+the other way, exactly like the ally swap in `Char.interact`, and waits a turn behind one
+walking the same way. A party member on the path never cancels the walk (upstream drops a
+path that doubled in length). Tapping a party member walks there; it does not follow them
+(`HeroAction.Interact` on a hero made the tapper trail the other player whenever the target
+cell happened to be occupied when the order was applied).
 
 **Animation callbacks are simulation.** Melee damage is rolled when the attack animation
 finishes (`CharSprite.onComplete` -> `Char.onAttackComplete`), on the render thread while the

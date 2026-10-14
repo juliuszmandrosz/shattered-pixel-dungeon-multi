@@ -248,6 +248,11 @@ public abstract class Actor implements Bundlable {
 		return current != null;
 	}
 
+	/** The actor whose turn is being processed (parked in act() or acting), or null. */
+	public static Actor current(){
+		return current;
+	}
+
 	public static int curActorPriority() {
 		return current != null ? current.actPriority : HERO_PRIO;
 	}

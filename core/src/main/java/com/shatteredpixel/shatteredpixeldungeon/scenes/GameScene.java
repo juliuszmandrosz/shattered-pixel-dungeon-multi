@@ -1885,11 +1885,10 @@ public class GameScene extends PixelScene {
 	private static final CellSelector.Listener defaultCellListener = new CellSelector.Listener() {
 		@Override
 		public void onSelect( Integer cell ) {
-			//co-op: the tap is sent to every client (including this one) and applied when the
-			//local hero's turn comes, see Coop. Taps while another player's hero waits are
-			//queued for the local hero as well.
+			//co-op: the tap is sent to every client (including this one) and applied at the local
+			//hero's next act(), see Coop. During somebody else's strict turn it is refused.
 			if (Coop.enabled) {
-				if (cell != null && cell != -1) Coop.submitCell( cell );
+				if (cell != null && cell != -1) Coop.handleCell( Dungeon.localHero(), cell );
 				return;
 			}
 			if (Dungeon.hero.handle( cell )) {
