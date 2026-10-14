@@ -17,6 +17,8 @@ import { Button, HERO_LABEL, HeroSprite } from "@/components/pd";
  *                  -> postMessage({ spd: "action", uid, seq, type, payload }) into the iframe
  * The server-assigned seq is what keeps every client's numbering identical; delivery order of
  * child_added differs between clients (own writes show up first), so it cannot be used.
+ * The game page also posts { spd: "error", kind, message } for uncaught errors, written to the
+ * log as "error" entries (not delivered to any game) so a frozen client can be diagnosed later.
  * The game also posts { spd: "turn", hero, epoch, danger, waiting, states } whenever the
  * simulation looks at the log for a hero (turn HUD, and the "skip" entries this page writes, see
  * the turn policy below) and { spd: "leave" } for "Main menu".
@@ -44,6 +46,7 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
   const [waited, setWaited] = useState(0);
   const turnStart = useRef<{ key: string; at: number } | null>(null);
   const sentSkip = useRef<string | null>(null);
+  const errorsSent = useRef(0);
 
   useEffect(() => {
     if (!user) return;
@@ -73,7 +76,7 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
       while (pending.has(next)) {
         const a = pending.get(next)!;
         pending.delete(next);
-        if (a.type !== "void") frame.current?.contentWindow?.postMessage({ spd: "action", ...a }, window.location.origin);
+        if (a.type !== "void" && a.type !== "error") frame.current?.contentWindow?.postMessage({ spd: "action", ...a }, window.location.origin);
         next++;
       }
       if (gapTimer) clearTimeout(gapTimer);
@@ -144,6 +147,10 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
           return;
         case "leave":
           router.push("/");
+          return;
+        case "error":
+          // a client error, kept in the room's log for diagnosis (never delivered to the games)
+          if (errorsSent.current++ < 8) void sendAction("error", `${String(data.kind)}: ${String(data.message)}`.slice(0, 2000));
           return;
         case "action":
           // actions sent by the game carry no uid; relayed ones do and must not be re-sent

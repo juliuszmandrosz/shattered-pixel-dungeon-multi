@@ -123,6 +123,11 @@ enemy came into view mid-walk, and the idle one lost its first combat turn to th
 had written while the other walked). Checksums travel every fourth apply, keyed by the apply
 count.
 
+**Client errors land in the room's log.** `lobby/public/game/index.html` (hand-edited after
+the build, only `app.js` is copied from `web/build/dist`) forwards uncaught errors, rejected
+promises and `console.error` to the lobby page, which writes them as `error` entries (never
+delivered to a game). A client that froze mid-game can then be diagnosed from the database.
+
 **The level must not depend on the player's profile.** Upstream reads the local journal and
 the tutorial flag while generating: the guidebook on floor 1 and the searching page on floor 2
 (`EntranceRoom`), guide and lore pages (`RegularLevel.createItems`), hidden entrance doors

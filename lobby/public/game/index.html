@@ -24,6 +24,22 @@
             <canvas id="canvas"></canvas>
         </div>
         <script>
+            // client errors go to the hosting page (and from there into the room's log), so a
+            // frozen client can be diagnosed from the database alone; a few per load is enough
+            (function () {
+                var sent = 0;
+                function report(kind, text) {
+                    if (sent++ >= 8 || window.parent === window) return;
+                    try { window.parent.postMessage({ spd: "error", kind: kind, message: String(text).slice(0, 1500) }, location.origin); } catch (e) {}
+                }
+                window.addEventListener("error", function (e) { report("error", (e.message || "") + "\n" + (e.error && e.error.stack || "")); });
+                window.addEventListener("unhandledrejection", function (e) { report("rejection", e.reason && (e.reason.stack || e.reason.message) || e.reason); });
+                var consoleError = console.error.bind(console);
+                console.error = function () {
+                    try { report("console", Array.prototype.map.call(arguments, function (a) { return a && a.stack || String(a); }).join(" ")); } catch (e) {}
+                    consoleError.apply(console, arguments);
+                };
+            })();
             async function start() {
                 main(["4.0.2", "922"])
             }
