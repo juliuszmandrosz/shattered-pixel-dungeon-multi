@@ -52,6 +52,24 @@ public final class CoopNet {
 			"});")
 	public static native void listen( Handler handler );
 
+	@JSFunctor
+	public interface StateFn extends JSObject {
+		String state();
+	}
+
+	@JSFunctor
+	public interface OrderFn extends JSObject {
+		void order( String type, String payload );
+	}
+
+	/** window.spd = { state(): object, order(type, payload) } for scripted players (bot tests). */
+	@JSBody(params = {"stateFn", "orderFn"}, script =
+			"window.spd = {" +
+			"  state: function () { var s = stateFn(); return s ? JSON.parse(s) : null; }," +
+			"  order: function (type, payload) { orderFn(String(type), payload === undefined ? '' : String(payload)); }" +
+			"};")
+	public static native void expose( StateFn stateFn, OrderFn orderFn );
+
 	@JSBody(params = {"json"}, script =
 			"var target = window.parent === window ? window : window.parent;" +
 			"target.postMessage(JSON.parse(json), window.location.origin);")

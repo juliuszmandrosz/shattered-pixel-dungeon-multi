@@ -196,6 +196,8 @@ public class WebShatteredPixelDungeon extends ShatteredPixelDungeon {
 			if (!names.isEmpty()) Coop.names.addAll(Arrays.asList(names.split(",")));
 			Coop.ownTicksPass = "1".equals(WebParams.get("legacyticks", ""));
 			Coop.transport = CoopNet::send;
+			CoopNet.expose( () -> Dungeon.level == null ? null : Coop.debugState(),
+					( type, payload ) -> Gdx.app.postRunnable( () -> Coop.debugOrder( type, payload ) ) );
 			CoopNet.listen(Coop::receive);
 			CoopNet.send("{\"spd\":\"ready\"}");
 			Dungeon.localHeroIndex = Math.max(0, Coop.localIndex());

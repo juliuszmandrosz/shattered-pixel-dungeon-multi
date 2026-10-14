@@ -25,6 +25,7 @@ import com.shatteredpixel.shatteredpixeldungeon.Assets;
 import com.shatteredpixel.shatteredpixeldungeon.Badges;
 import com.shatteredpixel.shatteredpixeldungeon.Challenges;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
 import com.shatteredpixel.shatteredpixeldungeon.Statistics;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
@@ -1002,10 +1003,21 @@ public abstract class Mob extends Char {
 					exp = Math.round(10 * spawningWeight());
 				}
 
-				if (exp > 0) {
-					Dungeon.hero.sprite.showStatusWithIcon(CharSprite.POSITIVE, Integer.toString(exp), FloatingText.EXPERIENCE);
+				if (Coop.enabled) {
+					//co-op: the whole party shares the experience of every kill
+					for (Hero h : Dungeon.heroes) {
+						if (!h.isAlive()) continue;
+						if (exp > 0 && h.sprite != null) {
+							h.sprite.showStatusWithIcon(CharSprite.POSITIVE, Integer.toString(exp), FloatingText.EXPERIENCE);
+						}
+						h.earnExp(exp, getClass());
+					}
+				} else {
+					if (exp > 0) {
+						Dungeon.hero.sprite.showStatusWithIcon(CharSprite.POSITIVE, Integer.toString(exp), FloatingText.EXPERIENCE);
+					}
+					Dungeon.hero.earnExp(exp, getClass());
 				}
-				Dungeon.hero.earnExp(exp, getClass());
 				//in the vault level we manually progress ring IDing. 5 enemies defeated to an ID
 				if (exp == 0 && Dungeon.level instanceof VaultLevel){
 					Item ring = Dungeon.hero.belongings.ring();

@@ -273,10 +273,16 @@ public abstract class Actor implements Bundlable {
 	public static void simulate( com.watabou.utils.Callback callback ){
 		boolean was = simulating;
 		simulating = true;
+		//the callback belongs to the actor whose turn is in progress (parked for the animation),
+		//so Dungeon.hero must be focused as it is during act(): on the render thread it is the
+		//client's own hero, and e.g. the experience for a kill went to a different hero on each
+		//client (found by the bot soak test, 2026-10-14)
+		if (current != null) Dungeon.focusHero( current );
 		try {
 			callback.call();
 		} finally {
 			simulating = was;
+			if (!was) Dungeon.unfocusHero();
 		}
 	}
 	

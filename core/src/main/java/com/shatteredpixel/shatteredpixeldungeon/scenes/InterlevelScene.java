@@ -473,6 +473,16 @@ public class InterlevelScene extends PixelScene {
 	private int dots = 0;
 	private boolean textFadingIn = true;
 
+	/** Presses the story screen's Continue (scripted players). */
+	public static void skipStory() {
+		if (!(Game.scene() instanceof InterlevelScene)) return;
+		InterlevelScene scene = (InterlevelScene) Game.scene();
+		if (scene.btnContinue == null || !scene.btnContinue.isActive() || scene.phase != Phase.STATIC) return;
+		scene.phase = Phase.FADE_OUT;
+		scene.timeLeft = fadeTime;
+		scene.btnContinue.enable(false);
+	}
+
 	@Override
 	public void update() {
 		super.update();

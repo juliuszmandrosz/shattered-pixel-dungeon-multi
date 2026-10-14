@@ -1756,6 +1756,19 @@ public class GameScene extends PixelScene {
 		}
 	}
 
+	/** Windows open over the game (story screens, badges, item windows): for scripted players. */
+	public static int openWindows() {
+		if (scene == null) return 0;
+		int n = 0;
+		for (Gizmo g : scene.members.toArray( new Gizmo[0] )) if (g instanceof Window) n++;
+		return n;
+	}
+
+	public static void dismissWindows() {
+		if (scene == null) return;
+		for (Gizmo g : scene.members.toArray( new Gizmo[0] )) if (g instanceof Window) ((Window) g).hide();
+	}
+
 	public static boolean cancel() {
 		cellSelector.resetKeyHold();
 		if (Coop.enabled) {

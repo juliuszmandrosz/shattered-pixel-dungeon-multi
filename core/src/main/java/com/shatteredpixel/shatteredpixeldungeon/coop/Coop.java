@@ -23,6 +23,10 @@ package com.shatteredpixel.shatteredpixeldungeon.coop;
 
 import com.badlogic.gdx.Gdx;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.scenes.InterlevelScene;
+import com.watabou.noosa.Game;
+import com.shatteredpixel.shatteredpixeldungeon.items.Heap;
+import com.shatteredpixel.shatteredpixeldungeon.levels.Level;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.HeroAction;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Talent;
@@ -187,6 +191,85 @@ public class Coop {
 		GLog.w( "Not your turn: " + nameOf( waitingHero ) + " is deciding." );
 		Hero local = Dungeon.localHero();
 		if (local != null && local.sprite != null) local.sprite.showStatus( CharSprite.WARNING, "not your turn" );
+	}
+
+	/**
+	 * What a scripted player (the bot soak test, lobby/public/test) needs to play: the party's
+	 * state, what the local hero knows of the map, enemies in sight, heaps, the stairs, and
+	 * whose turn the simulation waits for. JSON, read on the render thread.
+	 */
+	public static String debugState(){
+		StringBuilder b = new StringBuilder( "{" );
+		Level level = Dungeon.level;
+		Hero local = Dungeon.localHero();
+		b.append( "\"scene\":\"" ).append( Game.scene() == null ? "" : Game.scene().getClass().getSimpleName() ).append( '"' );
+		b.append( ",\"depth\":" ).append( Dungeon.depth );
+		b.append( ",\"me\":" ).append( localIndex() );
+		b.append( ",\"waiting\":" ).append( waitingHero );
+		b.append( ",\"strict\":" ).append( waitingStrict );
+		b.append( ",\"danger\":" ).append( partySeesEnemy() );
+		b.append( ",\"applies\":" ).append( applies );
+		b.append( ",\"desynced\":" ).append( desynced );
+		b.append( ",\"windows\":" ).append( GameScene.openWindows() );
+		b.append( ",\"heroes\":[" );
+		for (int i = 0; i < Dungeon.heroes.size(); i++) {
+			Hero h = Dungeon.heroes.get( i );
+			if (i > 0) b.append( ',' );
+			b.append( "{\"pos\":" ).append( h.pos ).append( ",\"hp\":" ).append( h.HP ).append( ",\"ht\":" ).append( h.HT )
+					.append( ",\"alive\":" ).append( h.isAlive() ).append( ",\"busy\":" ).append( h.isBusy() )
+					.append( ",\"resting\":" ).append( h.resting ).append( ",\"epoch\":" ).append( epoch( h ) )
+					.append( ",\"lvl\":" ).append( h.lvl ).append( "}" );
+		}
+		b.append( "]" );
+		if (level != null && local != null) {
+			b.append( ",\"w\":" ).append( level.width() ).append( ",\"h\":" ).append( level.height() );
+			b.append( ",\"exit\":" ).append( level.exit() ).append( ",\"entrance\":" ).append( level.entrance() );
+			b.append( ",\"enemies\":[" );
+			boolean first = true;
+			for (Mob m : level.mobs) {
+				if (m.alignment != com.shatteredpixel.shatteredpixeldungeon.actors.Char.Alignment.ENEMY || !level.heroFOV[m.pos]) continue;
+				if (!first) b.append( ',' );
+				first = false;
+				b.append( '[' ).append( m.pos ).append( ',' ).append( m.HP ).append( ']' );
+			}
+			b.append( "],\"heaps\":[" );
+			first = true;
+			for (Heap heap : level.heaps.valueList()) {
+				if (!level.visited[heap.pos] && !level.mapped[heap.pos]) continue;
+				if (!first) b.append( ',' );
+				first = false;
+				b.append( heap.pos );
+			}
+			//one char per cell: '?' unknown, '.' known and passable, 'x' known passable but
+			//avoided (a trap), '#' known and not passable
+			b.append( "],\"cells\":\"" );
+			for (int c = 0; c < level.length(); c++) {
+				boolean known = level.visited[c] || level.mapped[c];
+				b.append( !known ? '?' : !level.passable[c] ? '#' : level.avoid[c] ? 'x' : '.' );
+			}
+			b.append( '"' );
+		}
+		b.append( "}" );
+		return b.toString();
+	}
+
+	/** An order from a scripted player, through the same paths the UI uses. Render thread. */
+	public static void debugOrder( String type, String payload ){
+		if (Game.scene() instanceof InterlevelScene) {
+			if ("dismiss".equals( type )) InterlevelScene.skipStory();
+			return;
+		}
+		Hero local = Dungeon.localHero();
+		if (local == null || !(Game.scene() instanceof GameScene)) return;
+		switch (type) {
+			case "cell": handleCell( local, Integer.parseInt( payload ) ); break;
+			case "rest": submitRest( "1".equals( payload ) ); break;
+			case "search": submitSearch(); break;
+			case "wait": waitOrPickup( local ); break;
+			case "cancel": GameScene.cancel(); break;
+			case "dismiss": GameScene.dismissWindows(); break;
+			default: GLog.w( "unknown debug order: " + type );
+		}
 	}
 
 	/** Asks the hosting page to leave the game (back to the lobby). */
