@@ -108,13 +108,28 @@ coalesced or reordered on receipt.
 
 **Who writes the skips.** The game posts `{spd:"turn", hero, epoch, danger, waiting, states}`
 whenever it looks at the log for a hero (and right after a step, so the next entry is on its
-way during the animation). The page writes `skip hero:epoch` at once for its own hero when it
-is busy, or idle while others move with no enemy in sight; the other clients write it after
-`AFK_MS` (staggered by player order) in case the owner's tab is gone; a strict turn is skipped
-only after `SKIP_SECONDS_DANGER` or by the countdown button. `epoch` is the number of entries
-applied (and passes) for that hero, identical everywhere, so duplicates and late skips are
-dropped the same way on every client. Checksums travel every fourth apply, keyed by the apply
+way during the animation). The page writes `skip hero:epoch` ("carry on") at once for its own
+hero when it is busy, and once more after `RETRY_MS` if the game is still parked on it (a lost
+write); the other clients write it after `AFK_MS` (staggered by player order) in case the
+owner's tab is gone; a strict turn is skipped only after `SKIP_SECONDS_DANGER` or by the
+countdown button. An idle hero needs no entry of its own: with no enemy in sight it lets the
+turn pass on the busy hero's entry. `epoch` is the number of entries applied (and passes) for
+that hero, identical everywhere, so duplicates and late skips are dropped the same way on
+every client. A skip written by the hero's own client is also dropped once the hero is idle
+(`Coop.dropSkip`): it was written ahead for a walk that has ended since, and applied it would
+let the turn pass, usually right in front of the enemy whose appearance interrupted the walk
+(the "my hero gets fewer moves" report of 2026-10-14: both heroes lost a turn every time an
+enemy came into view mid-walk, and the idle one lost its first combat turn to the skip its page
+had written while the other walked). Checksums travel every fourth apply, keyed by the apply
 count.
+
+**The level must not depend on the player's profile.** Upstream reads the local journal and
+the tutorial flag while generating: the guidebook on floor 1 and the searching page on floor 2
+(`EntranceRoom`), guide and lore pages (`RegularLevel.createItems`), hidden entrance doors
+(`RegularPainter`), and `SPDSettings.intro()` also switches hunger off and stops accidental
+door discovery. Two players with different journals got different heaps and maps (seen when
+replaying a recorded room in the harness: one heap short from the first checksum on). In co-op
+none of the pages drop, and `SPDSettings.intro()` is false.
 
 **Party members never block.** Corridors are one tile wide, so a hero standing in a doorway
 would make every order of the hero behind it a silent no-op (`getCloser` found no path, no

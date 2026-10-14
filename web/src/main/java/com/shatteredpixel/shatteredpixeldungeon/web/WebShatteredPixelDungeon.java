@@ -194,6 +194,7 @@ public class WebShatteredPixelDungeon extends ShatteredPixelDungeon {
 			//display names in player order (optional, for in-game messages)
 			String names = WebParams.get("names", "");
 			if (!names.isEmpty()) Coop.names.addAll(Arrays.asList(names.split(",")));
+			Coop.ownTicksPass = "1".equals(WebParams.get("legacyticks", ""));
 			Coop.transport = CoopNet::send;
 			CoopNet.listen(Coop::receive);
 			CoopNet.send("{\"spd\":\"ready\"}");

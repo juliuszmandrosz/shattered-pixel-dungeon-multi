@@ -106,12 +106,13 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
           seq = result.snapshot.val() as number;
           const action: GameAction = { uid: user!.uid, seq, type, payload: payload ?? null, at: Date.now() };
           await set(ref(db, `actions/${roomId}/${actionKey(seq)}`), action);
-          return;
+          return true;
         } catch (err) {
           console.warn(`action ${type} seq ${seq} refused (attempt ${attempt + 1})`, err);
         }
       }
       console.error(`action ${type} dropped after 6 attempts`);
+      return false;
     },
     [roomId, user],
   );
@@ -159,29 +160,36 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
     () => (players ? Object.entries(players).sort((a, b) => a[1].order - b[1].order).map(([uid]) => uid) : []),
     [players],
   );
-  // turn policy: the game consumes one log entry per hero step, so somebody has to write
-  // "nothing new" (skip hero:epoch) whenever a hero is busy walking or resting, and for an idle
-  // hero while others move and no enemy is in sight (it lets the turn pass). Each client writes
-  // its own hero's entry as soon as any turn message shows it will be needed (the entry is then
-  // in the log before the game asks, so a round costs animation time, not a round trip); the
-  // other clients write it for the announced hero after a short delay, in case its owner is
-  // absent (duplicates are dropped by the game, the epoch no longer matches). A strict turn
-  // (idle hero, enemy in sight) is only skipped after a long timeout, or by the countdown button.
+  // turn policy: the game consumes one log entry per step of a busy hero (walking, resting),
+  // so its client writes "carry on" (skip hero:epoch) as soon as a turn message shows the hero
+  // busy: the entry is in the log before the game asks, so a round costs animation time, not a
+  // round trip. An idle hero needs no entry of its own: with no enemy in sight it lets the turn
+  // pass on the busy hero's entry, and with an enemy in sight the game waits for its order.
+  // The other clients write the busy hero's entry after a short delay, in case its owner's tab
+  // is gone; a strict turn (idle hero, enemy in sight) is only skipped after a long timeout, or
+  // by the countdown button. The game drops what is late (epoch mismatch) and a tick for a hero
+  // that stopped since (its walk ended or an enemy interrupted it), so a duplicate never hurts.
   useEffect(() => {
     if (!turn || !gameReady || !user) return;
     const busy = (s: string | undefined) => s === "walk" || s === "rest";
     const myIndex = order.indexOf(user.uid);
-    const write = (hero: number, epoch: number) => {
+    const write = (hero: number, epoch: number, again = false) => {
       const key = `${hero}:${epoch}`;
-      if (sentSkip.current === key) return;
+      if (sentSkip.current === key && !again) return;
       sentSkip.current = key;
-      void sendAction("skip", key);
+      void sendAction("skip", key).then((ok) => {
+        if (!ok && sentSkip.current === key) sentSkip.current = null;
+      });
     };
-    // own hero: tick while busy; pass while idle, others move and no enemy is in sight
-    const othersBusy = (hero: number) => turn.states.some((s, i) => i !== hero && busy(s));
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    // own hero: tick while busy; if the game is still parked on it after a while, the entry
+    // was lost on the way (a refused write, a stale cache) and is written once more
     const myEpoch = turn.epochs[myIndex] ?? (turn.hero === myIndex ? turn.epoch : null);
-    if (myIndex >= 0 && myEpoch !== null && (busy(turn.states[myIndex]) || (!turn.danger && othersBusy(myIndex)))) {
+    if (myIndex >= 0 && myEpoch !== null && busy(turn.states[myIndex])) {
       write(myIndex, myEpoch);
+      if (turn.waiting && turn.hero === myIndex) {
+        timers.push(setTimeout(() => write(myIndex, myEpoch, true), RETRY_MS));
+      }
     }
     // the announced hero, when it is somebody else's: cover an absent owner, time a strict turn
     const key = `${turn.hero}:${turn.epoch}`;
@@ -190,21 +198,20 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
     const strict = !busy(turn.states[turn.hero]) && turn.danger;
     let delay: number | null = null;
     if (turn.hero !== myIndex) {
-      if (!strict && (busy(turn.states[turn.hero]) || othersBusy(turn.hero))) {
+      if (busy(turn.states[turn.hero])) {
         delay = AFK_MS + AFK_STAGGER_MS * ((myIndex - turn.hero + order.length) % order.length);
       } else if (strict) {
         delay = SKIP_SECONDS_DANGER * 1000;
       }
     }
-    let timer: ReturnType<typeof setTimeout> | null = null;
     if (delay !== null) {
       const hero = turn.hero, epoch = turn.epoch;
-      timer = setTimeout(() => write(hero, epoch), Math.max(0, delay - (Date.now() - started)));
+      timers.push(setTimeout(() => write(hero, epoch), Math.max(0, delay - (Date.now() - started))));
     }
     setWaited(Math.floor((Date.now() - started) / 1000));
     const ticker = strict ? setInterval(() => setWaited(Math.floor((Date.now() - started) / 1000)), 500) : null;
     return () => {
-      if (timer) clearTimeout(timer);
+      for (const t of timers) clearTimeout(t);
       if (ticker) clearInterval(ticker);
     };
   }, [turn, gameReady, sendAction, order, user]);
@@ -277,6 +284,8 @@ const COUNTDOWN_SECONDS = 10;
 // how long the other clients give a hero's owner to write its own "nothing new" entry before
 // writing it for them (absent or hidden tab), staggered by player order
 const AFK_MS = 700;
+// a busy hero of mine the game is still parked on after this long gets its entry written again
+const RETRY_MS = 1500;
 const AFK_STAGGER_MS = 300;
 // a missing seq older than this is treated as abandoned and filled with a void entry
 const GAP_SECONDS = 6;

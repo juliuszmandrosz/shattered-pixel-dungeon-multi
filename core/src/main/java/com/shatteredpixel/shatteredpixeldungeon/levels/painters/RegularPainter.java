@@ -267,7 +267,9 @@ public abstract class RegularPainter extends Painter {
 
 				//unlocked entrance doors on floor 1 are hidden during tutorial
 				//unlocked entrance doors on floor 2 are hidden if the player hasn't picked up 2nd guidebook page
-				if (d.type == Room.Door.Type.UNLOCKED && (r.isEntrance() || n.isEntrance())){
+				//co-op: both depend on this client's profile, and the map must be the same for everyone
+				if (d.type == Room.Door.Type.UNLOCKED && (r.isEntrance() || n.isEntrance())
+						&& !com.shatteredpixel.shatteredpixeldungeon.coop.Coop.enabled){
 					if ((Dungeon.depth == 1 && SPDSettings.intro())
 							|| (Dungeon.depth == 2 && !Document.ADVENTURERS_GUIDE.isPageFound(Document.GUIDE_SEARCHING))) {
 						d.type = Room.Door.Type.HIDDEN;

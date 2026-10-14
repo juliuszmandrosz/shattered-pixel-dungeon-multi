@@ -83,6 +83,13 @@ public class Coop {
 	/** Set while a queued action is being applied, so the gated input paths let it through. */
 	public static boolean applying = false;
 
+	/**
+	 * Diagnostics only (URL param legacyticks=1): keep the rule from before 2026-10-14, where an
+	 * idle hero let its turn pass on a skip its own client had written ahead for a walk. Lets a
+	 * room recorded under that rule be replayed faithfully in the harness.
+	 */
+	public static boolean ownTicksPass = false;
+
 	/** True once a checksum from another client disagreed with ours. */
 	public static boolean desynced = false;
 
@@ -468,7 +475,7 @@ public class Coop {
 						return busy ? CONTINUE : PASS;
 					}
 					a.consumed = true;
-					if ("skip".equals( a.type ) && epochOf( a ) != epoch( hero )) continue; //stale, dropped
+					if (dropSkip( hero, a, busy )) continue;
 					waitingHero = -1;
 					return a;
 				} else {
@@ -476,7 +483,7 @@ public class Coop {
 						Action a = log.get( i );
 						if (a.consumed || a.hero != me) continue;
 						a.consumed = true;
-						if ("skip".equals( a.type ) && epochOf( a ) != epoch( hero )) continue;
+						if (dropSkip( hero, a, false )) continue;
 						waitingHero = -1;
 						return a;
 					}
@@ -484,6 +491,24 @@ public class Coop {
 				}
 			}
 		}
+	}
+
+	/**
+	 * A skip is dropped when its epoch is not the hero's (a late or duplicate entry), and when
+	 * the hero is idle and its own client wrote it: that is a "carry on" tick written ahead for
+	 * a walk, and the walk has ended since (its last step, or an enemy came into view and
+	 * interrupted it). Applied, it would let the hero's turn pass, often right in front of the
+	 * enemy that interrupted it. A skip written by another client is a deliberate one (an
+	 * absent owner, the strict-turn timeout) and stands.
+	 */
+	private static boolean dropSkip( Hero hero, Action a, boolean busy ){
+		if (!"skip".equals( a.type )) return false;
+		if (epochOf( a ) != epoch( hero )) return true;
+		if (busy || ownTicksPass) return false;
+		boolean own = a.uid.equals( players.get( a.hero ) );
+		if (own) Gdx.app.log( "coop", "dropped own tick seq=" + a.seq + " for idle hero " + a.hero
+				+ (partySeesEnemy() ? " (enemy in sight)" : "") );
+		return own;
 	}
 
 	private static Action park( int hero, boolean strict ){
@@ -577,7 +602,12 @@ public class Coop {
 				case "skip":
 					//"nothing new": a busy hero carries on, an idle one lets the turn pass
 					//(stale epochs were dropped by next())
-					if (!hero.isBusy()) hero.pass();
+					if (!hero.isBusy()) {
+						hero.pass();
+						Gdx.app.log( "coop", "turn passed by skip seq=" + action.seq + " hero=" + action.hero
+								+ (action.uid.equals( players.get( action.hero ) ) ? " (own client)" : " (other client)")
+								+ (partySeesEnemy() ? " enemy in sight" : "") );
+					}
 					result = true;
 					break;
 				default:

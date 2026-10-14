@@ -32,6 +32,7 @@
   ids.forEach((id, i) => {
     const q = new URLSearchParams({ room, player: id, order: ids.join(","), seed, party, heroClass: classes[i] });
     if (params.get("rngtrace")) q.set("rngtrace", "1");
+    if (params.get("legacyticks")) q.set("legacyticks", "1");
     q.set("v", String(Date.now()));
     frames[id].src = (params.get("base") || "/game") + "/index.html?" + q.toString();
   });
@@ -39,12 +40,15 @@
   const log = [];
   const ready = {};
   // ?actions=A|cell|835;B|cell|713;... replays a recorded sequence (one action every 2.5s once
-  // every frame is ready), to reproduce a desync seen in a real room
+  // every frame is ready, ?interval=ms changes the pace), to reproduce a desync seen in a real
+  // room; window.replay(list) does the same from a script. ?policy=off stops the frames from
+  // writing skips, so a recorded log replays exactly as written
   const scripted = (params.get("actions") || "").split(";").filter(Boolean).map((a) => {
     const [uid, type, payload] = a.split("|");
     return { uid, type, payload };
   });
   let scriptTimer = null;
+  const interval = Number(params.get("interval")) || 2500;
   function relay(uid, type, payload) {
     const msg = { spd: "action", id: String(log.length), uid, seq: log.length, type, payload, at: Date.now() };
     log.push(msg);
@@ -56,36 +60,42 @@
     if (!scripted.length || scriptTimer || !ids.every((id) => ready[id])) return;
     scriptTimer = setInterval(() => {
       const next = scripted.shift();
-      if (!next) { clearInterval(scriptTimer); return; }
+      if (!next) { clearInterval(scriptTimer); scriptTimer = null; return; }
       relay(next.uid, next.type, next.payload);
-    }, 2500);
+    }, interval);
   }
+  window.replay = (list) => { scripted.push(...list); maybeStartScript(); };
+  window.replayLeft = () => scripted.length;
   // the lobby page's turn policy (see PlayClient.tsx), once per frame: the owner writes
-  // "nothing new" (skip hero:epoch) at once for its busy hero, or its idle hero while others
-  // move with no enemy in sight; other frames after a delay; a strict turn only after a long
-  // timeout. ?afk=A makes frame A absent (it never writes), to exercise the fallback.
-  const AFK_MS = 700, AFK_STAGGER_MS = 300, SKIP_SECONDS_DANGER = 45;
-  const absent = (params.get("afk") || "").split(",").filter(Boolean);
+  // "carry on" (skip hero:epoch) at once for its busy hero (again after RETRY_MS if the game is
+  // still parked on it); other frames after a delay; a strict turn only after a long timeout.
+  // ?afk=A makes frame A absent (it never writes), to exercise the fallback; ?policy=off makes
+  // every frame absent, for replays.
+  const AFK_MS = 700, AFK_STAGGER_MS = 300, SKIP_SECONDS_DANGER = 45, RETRY_MS = 1500;
+  const absent = params.get("policy") === "off" ? ids.slice() : (params.get("afk") || "").split(",").filter(Boolean);
   const timers = {}, sent = {}, starts = {};
   function policy(uid, t) {
-    if (timers[uid]) { clearTimeout(timers[uid]); timers[uid] = null; }
+    for (const timer of timers[uid] || []) clearTimeout(timer);
+    timers[uid] = [];
     if (absent.includes(uid)) return;
     const busy = (s) => s === "walk" || s === "rest";
     const myIndex = ids.indexOf(uid);
-    const write = (hero, epoch) => { const key = hero + ":" + epoch; if (sent[uid] === key) return; sent[uid] = key; relay(uid, "skip", key); };
-    const othersBusy = (hero) => t.states.some((s, i) => i !== hero && busy(s));
+    const write = (hero, epoch, again) => { const key = hero + ":" + epoch; if (sent[uid] === key && !again) return; sent[uid] = key; relay(uid, "skip", key); };
     const myEpoch = t.epochs ? t.epochs[myIndex] : null;
-    if (myEpoch !== null && (busy(t.states[myIndex]) || (!t.danger && othersBusy(myIndex)))) write(myIndex, myEpoch);
+    if (myEpoch !== null && busy(t.states[myIndex])) {
+      write(myIndex, myEpoch);
+      if (t.waiting && t.hero === myIndex) timers[uid].push(setTimeout(() => write(myIndex, myEpoch, true), RETRY_MS));
+    }
     const key = t.hero + ":" + t.epoch;
     if (!starts[uid] || starts[uid].key !== key) starts[uid] = { key, at: Date.now() };
     const strict = !busy(t.states[t.hero]) && t.danger;
     let delay = null;
     if (t.hero !== myIndex) {
-      if (!strict && (busy(t.states[t.hero]) || othersBusy(t.hero))) delay = AFK_MS + AFK_STAGGER_MS * ((myIndex - t.hero + ids.length) % ids.length);
+      if (busy(t.states[t.hero])) delay = AFK_MS + AFK_STAGGER_MS * ((myIndex - t.hero + ids.length) % ids.length);
       else if (strict) delay = SKIP_SECONDS_DANGER * 1000;
     }
     if (delay === null) return;
-    timers[uid] = setTimeout(() => write(t.hero, t.epoch), Math.max(0, delay - (Date.now() - starts[uid].at)));
+    timers[uid].push(setTimeout(() => write(t.hero, t.epoch), Math.max(0, delay - (Date.now() - starts[uid].at))));
   }
   window.addEventListener("message", (e) => {
     const d = e.data;
