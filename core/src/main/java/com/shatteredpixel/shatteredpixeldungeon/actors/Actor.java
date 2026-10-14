@@ -22,6 +22,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.actors;
 
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
 import com.shatteredpixel.shatteredpixeldungeon.Statistics;
 import com.shatteredpixel.shatteredpixeldungeon.actors.blobs.Blob;
 import com.shatteredpixel.shatteredpixeldungeon.actors.buffs.Buff;
@@ -33,6 +34,7 @@ import com.watabou.utils.Bundle;
 import com.watabou.utils.SparseArray;
 
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 
 public abstract class Actor implements Bundlable {
 	
@@ -149,8 +151,10 @@ public abstract class Actor implements Bundlable {
 	// *** Static members ***
 	// **********************
 	
-	private static HashSet<Actor> all = new HashSet<>();
-	private static HashSet<Char> chars = new HashSet<>();
+	//insertion ordered: iteration order must be identical on every co-op client,
+	//a plain HashSet orders by identity hash which differs between runs
+	private static HashSet<Actor> all = new LinkedHashSet<>();
+	private static HashSet<Char> chars = new LinkedHashSet<>();
 	private static volatile Actor current;
 
 	private static SparseArray<Actor> ids = new SparseArray<>();
@@ -200,6 +204,9 @@ public abstract class Actor implements Bundlable {
 	public static void init() {
 		
 		add( Dungeon.hero );
+		for (com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero h : Dungeon.heroes) {
+			if (h != Dungeon.hero && h.isAlive()) add( h );
+		}
 		
 		for (Mob mob : Dungeon.level.mobs) {
 			add( mob );
@@ -241,17 +248,48 @@ public abstract class Actor implements Bundlable {
 		return current != null;
 	}
 
+	/** The actor whose turn is being processed (parked in act() or acting), or null. */
+	public static Actor current(){
+		return current;
+	}
+
 	public static int curActorPriority() {
 		return current != null ? current.actPriority : HERO_PRIO;
 	}
 	
 	public static boolean keepActorThreadAlive = true;
+
+	//true while the actor thread is running simulation code. It is cleared around the two points
+	//where the thread blocks, because on the web (green threads) the render thread runs in between
+	//and its particles must not consume simulation randomness. Thread identity is not reliable there.
+	public static volatile boolean simulating = false;
+
+	/**
+	 * Runs game logic triggered by a finished animation (the render thread: attack and operate
+	 * callbacks, missiles landing, knockback) as part of the simulation. The actor thread is
+	 * parked meanwhile and these callbacks roll damage and more, so their random draws must come
+	 * from the simulation generator, identically on every co-op client.
+	 */
+	public static void simulate( com.watabou.utils.Callback callback ){
+		boolean was = simulating;
+		simulating = true;
+		try {
+			callback.call();
+		} finally {
+			simulating = was;
+		}
+	}
 	
 	public static void process() {
 		
 		boolean doNext;
 		boolean interrupted = false;
+		simulating = true;
+		//captured once: on the web Thread.currentThread() is not stable across green-thread
+		//switches, and the monitor used for wait/notify must be the same object every time
+		final Thread self = Thread.currentThread();
 
+		try {
 		do {
 			
 			current = null;
@@ -262,8 +300,11 @@ public abstract class Actor implements Bundlable {
 					for (Actor actor : all) {
 
 						//some actors will always go before others if time is equal.
+						//ties on priority are broken by id so the choice never depends on iteration order
 						if (actor.time < earliest ||
-								actor.time == earliest && (current == null || actor.actPriority > current.actPriority)) {
+								actor.time == earliest && (current == null
+										|| actor.actPriority > current.actPriority
+										|| (actor.actPriority == current.actPriority && actor.id() < current.id()))) {
 							earliest = actor.time;
 							current = actor;
 						}
@@ -282,12 +323,20 @@ public abstract class Actor implements Bundlable {
 					// is moving, wait till the movement is over
 					try {
 						synchronized (((Char)acting).sprite) {
-							if (((Char)acting).sprite.isMoving) {
-								((Char) acting).sprite.wait();
+							//timed wait: a lost notify (seen on the web backend) then costs 50ms, not a hang
+							while (((Char)acting).sprite.isMoving) {
+								Dungeon.unfocusHero();
+								simulating = false;
+								((Char) acting).sprite.wait(50);
+								simulating = true;
 							}
 						}
 					} catch (InterruptedException e) {
+						simulating = true;
 						interrupted = true;
+					} catch (IllegalMonitorStateException e) {
+						simulating = true;
+						System.err.println("coop: sprite wait without monitor");
 					}
 				}
 				
@@ -297,6 +346,8 @@ public abstract class Actor implements Bundlable {
 					doNext = false;
 					current = null;
 				} else {
+					//"Dungeon.hero" must be the same on every co-op client while simulation code runs
+					Dungeon.focusHero( acting );
 					doNext = acting.act();
 					if (doNext && (Dungeon.hero == null || !Dungeon.hero.isAlive())) {
 						doNext = false;
@@ -308,7 +359,7 @@ public abstract class Actor implements Bundlable {
 			}
 
 			if (!doNext){
-				synchronized (Thread.currentThread()) {
+				synchronized (self) {
 					
 					interrupted = interrupted || Thread.interrupted();
 					
@@ -318,17 +369,43 @@ public abstract class Actor implements Bundlable {
 					}
 
 					//signals to the gamescene that actor processing is finished for now
-					Thread.currentThread().notify();
-					
 					try {
-						Thread.currentThread().wait();
-					} catch (InterruptedException e) {
-						interrupted = true;
+						self.notify();
+					} catch (IllegalMonitorStateException e) {
+						System.err.println("coop: actor notify without monitor");
 					}
+					
+					//timed wait so a lost notify (web backend) cannot hang the run. The scene only
+					//notifies once current is null (next() was called), so after a timeout we keep
+					//waiting while an actor is still waiting for input: acting again would reset
+					//selectors the actor may have opened.
+					Dungeon.unfocusHero();
+					simulating = false;
+					do {
+						try {
+							self.wait(100);
+						} catch (InterruptedException e) {
+							interrupted = true;
+						} catch (IllegalMonitorStateException e) {
+							System.err.println("coop: actor wait without monitor");
+							try {
+								Thread.sleep(16);
+							} catch (InterruptedException ie) {
+								interrupted = true;
+							}
+						}
+					} while (current != null && !interrupted && keepActorThreadAlive && !Thread.interrupted());
+					simulating = true;
 				}
 			}
 
 		} while (keepActorThreadAlive);
+		} finally {
+			//whatever ends this thread (interrupt, an exception), the render side must not keep
+			//drawing from the simulation generator
+			Dungeon.unfocusHero();
+			simulating = false;
+		}
 	}
 	
 	public static void add( Actor actor ) {
@@ -395,8 +472,8 @@ public abstract class Actor implements Bundlable {
 	}
 
 	public static synchronized HashSet<Actor> all() {
-		return new HashSet<>(all);
+		return new LinkedHashSet<>(all);
 	}
 
-	public static synchronized HashSet<Char> chars() { return new HashSet<>(chars); }
+	public static synchronized HashSet<Char> chars() { return new LinkedHashSet<>(chars); }
 }

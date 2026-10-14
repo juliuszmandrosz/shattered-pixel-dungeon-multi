@@ -24,6 +24,7 @@ package com.shatteredpixel.shatteredpixeldungeon.levels;
 import com.shatteredpixel.shatteredpixeldungeon.Bones;
 import com.shatteredpixel.shatteredpixeldungeon.Challenges;
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
 import com.shatteredpixel.shatteredpixeldungeon.Statistics;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
@@ -557,11 +558,13 @@ public abstract class RegularLevel extends Level {
 		Random.popGenerator();
 
 		//guide pages
+		//co-op: which pages are missing is read from this client's journal, and every client
+		//must generate the same heaps, so no guide or lore pages drop in a shared game
 		Random.pushGenerator( Random.Long() );
 			Collection<String> allPages = Document.ADVENTURERS_GUIDE.pageNames();
 			ArrayList<String> missingPages = new ArrayList<>();
 			for ( String page : allPages){
-				if (!Document.ADVENTURERS_GUIDE.isPageFound(page)){
+				if (!Coop.enabled && !Document.ADVENTURERS_GUIDE.isPageFound(page)){
 					missingPages.add(page);
 				}
 			}
@@ -586,7 +589,7 @@ public abstract class RegularLevel extends Level {
 		//lore pages
 		//TODO a fair bit going on here, I might want to refactor/externalize this in the future
 		Random.pushGenerator( Random.Long() );
-			if (Document.ADVENTURERS_GUIDE.allPagesFound()){
+			if (!Coop.enabled && Document.ADVENTURERS_GUIDE.allPagesFound()){
 
 				int region = 1+(Dungeon.depth-1)/5;
 

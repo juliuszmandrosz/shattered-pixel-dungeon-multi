@@ -22,6 +22,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.ui;
 
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
 import com.shatteredpixel.shatteredpixeldungeon.SPDAction;
 import com.shatteredpixel.shatteredpixeldungeon.messages.Messages;
 import com.shatteredpixel.shatteredpixeldungeon.scenes.PixelScene;
@@ -68,8 +69,8 @@ public class ResumeIndicator extends Tag {
 	@Override
 	protected void onClick() {
 		super.onClick();
-		if (Dungeon.hero.ready) {
-			Dungeon.hero.resume();
+		if (Dungeon.localHero().ready) {
+			Coop.resume( Dungeon.localHero() );
 		}
 	}
 
@@ -80,10 +81,10 @@ public class ResumeIndicator extends Tag {
 
 	@Override
 	public void update() {
-		if (!Dungeon.hero.isAlive())
+		if (!Dungeon.localHero().isAlive())
 			visible = false;
-		else if (visible != (Dungeon.hero.lastAction != null)){
-			visible = Dungeon.hero.lastAction != null;
+		else if (visible != (Dungeon.localHero().lastAction != null)){
+			visible = Dungeon.localHero().lastAction != null;
 			if (visible)
 				flash();
 		}

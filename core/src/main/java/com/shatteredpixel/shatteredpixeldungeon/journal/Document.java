@@ -104,6 +104,8 @@ public enum Document {
 	}
 
 	public boolean isPageFound( String page ){
+		//co-op: level generation must not depend on this client's journal, every page counts as known
+		if (com.shatteredpixel.shatteredpixeldungeon.coop.Coop.enabled) return true;
 		return pagesStates.containsKey(page) && pagesStates.get(page) > NOT_FOUND;
 	}
 
@@ -144,6 +146,8 @@ public enum Document {
 	}
 
 	public boolean isPageRead( String page ){
+		//co-op: level generation must not depend on this client's journal, every page counts as known
+		if (com.shatteredpixel.shatteredpixeldungeon.coop.Coop.enabled) return true;
 		return pagesStates.containsKey(page) && pagesStates.get(page) == READ;
 	}
 

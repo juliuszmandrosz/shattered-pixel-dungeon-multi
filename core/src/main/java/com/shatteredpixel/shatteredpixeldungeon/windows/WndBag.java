@@ -22,6 +22,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.windows;
 
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
 import com.shatteredpixel.shatteredpixeldungeon.SPDAction;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Belongings;
 import com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero;
@@ -128,7 +129,7 @@ public class WndBag extends WndTabbed {
 		resize( windowWidth, windowHeight );
 
 		int i = 1;
-		for (Bag b : Dungeon.hero.belongings.getBags()) {
+		for (Bag b : Dungeon.localHero().belongings.getBags()) {
 			if (b != null) {
 				BagTab tab = new BagTab( b, i++ );
 				add( tab );
@@ -148,26 +149,26 @@ public class WndBag extends WndTabbed {
 
 	public static WndBag lastBag(ItemSelector selector ) {
 		
-		if (lastBag != null && Dungeon.hero.belongings.backpack.contains( lastBag )) {
+		if (lastBag != null && Dungeon.localHero().belongings.backpack.contains( lastBag )) {
 			
 			return new WndBag( lastBag, selector );
 			
 		} else {
 			
-			return new WndBag( Dungeon.hero.belongings.backpack, selector );
+			return new WndBag( Dungeon.localHero().belongings.backpack, selector );
 			
 		}
 	}
 
 	public static WndBag getBag( ItemSelector selector ) {
 		if (selector.preferredBag() == Belongings.Backpack.class){
-			return new WndBag( Dungeon.hero.belongings.backpack, selector );
+			return new WndBag( Dungeon.localHero().belongings.backpack, selector );
 
 		} else if (selector.preferredBag() != null){
-			Bag bag = Dungeon.hero.belongings.getItem( selector.preferredBag() );
+			Bag bag = Dungeon.localHero().belongings.getItem( selector.preferredBag() );
 			if (bag != null)    return new WndBag( bag, selector );
 			//if a specific preferred bag isn't present, then the relevant items will be in backpack
-			else                return new WndBag( Dungeon.hero.belongings.backpack, selector );
+			else                return new WndBag( Dungeon.localHero().belongings.backpack, selector );
 		}
 
 		return lastBag( selector );
@@ -243,7 +244,7 @@ public class WndBag extends WndTabbed {
 	protected void placeItems( Bag container ) {
 		
 		// Equipped items
-		Belongings stuff = Dungeon.hero.belongings;
+		Belongings stuff = Dungeon.localHero().belongings;
 		placeItem( stuff.weapon != null ? stuff.weapon : new Placeholder( ItemSpriteSheet.WEAPON_HOLDER ) );
 		placeItem( stuff.armor != null ? stuff.armor : new Placeholder( ItemSpriteSheet.ARMOR_HOLDER ) );
 		placeItem( stuff.artifact != null ? stuff.artifact : new Placeholder( ItemSpriteSheet.ARTIFACT_HOLDER ) );
@@ -253,7 +254,7 @@ public class WndBag extends WndTabbed {
 		int equipped = 5;
 
 		//the container itself if it's not the root backpack
-		if (container != Dungeon.hero.belongings.backpack){
+		if (container != Dungeon.localHero().belongings.backpack){
 			placeItem(container);
 			count--; //don't count this one, as it's not actually inside of itself
 		} else if (stuff.secondWep != null) {
@@ -287,7 +288,7 @@ public class WndBag extends WndTabbed {
 		InventorySlot slot = new InventorySlot( item ){
 			@Override
 			protected void onClick() {
-				if (lastBag != item && !lastBag.contains(item) && !item.isEquipped(Dungeon.hero)){
+				if (lastBag != item && !lastBag.contains(item) && !item.isEquipped(Dungeon.localHero())){
 
 					hide();
 
@@ -296,7 +297,7 @@ public class WndBag extends WndTabbed {
 					if (selector.hideAfterSelecting()){
 						hide();
 					}
-					selector.onSelect( item );
+					Coop.selectItem( selector, item );
 
 				} else {
 
@@ -307,7 +308,7 @@ public class WndBag extends WndTabbed {
 
 			@Override
 			protected void onRightClick() {
-				if (lastBag != item && !lastBag.contains(item) && !item.isEquipped(Dungeon.hero)){
+				if (lastBag != item && !lastBag.contains(item) && !item.isEquipped(Dungeon.localHero())){
 
 					hide();
 
@@ -316,7 +317,7 @@ public class WndBag extends WndTabbed {
 					if (selector.hideAfterSelecting()){
 						hide();
 					}
-					selector.onSelect( item );
+					Coop.selectItem( selector, item );
 
 				} else {
 

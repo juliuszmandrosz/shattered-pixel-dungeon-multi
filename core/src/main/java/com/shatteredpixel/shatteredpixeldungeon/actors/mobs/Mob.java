@@ -434,8 +434,10 @@ public abstract class Mob extends Char {
 					
 					if (enemies.isEmpty()) {
 						//try to find the hero third
-						if (fieldOfView[Dungeon.hero.pos] && Dungeon.hero.invisible <= 0) {
-							enemies.add(Dungeon.hero);
+						for (Hero h : Dungeon.heroes) {
+							if (h.isAlive() && fieldOfView[h.pos] && h.invisible <= 0) {
+								enemies.add(h);
+							}
 						}
 					}
 				}
@@ -461,8 +463,10 @@ public abstract class Mob extends Char {
 						enemies.add(mob);
 
 				//and look for the hero
-				if (fieldOfView[Dungeon.hero.pos] && Dungeon.hero.invisible <= 0) {
-					enemies.add(Dungeon.hero);
+				for (Hero h : Dungeon.heroes) {
+					if (h.isAlive() && fieldOfView[h.pos] && h.invisible <= 0) {
+						enemies.add(h);
+					}
 				}
 				
 			}
@@ -501,13 +505,13 @@ public abstract class Mob extends Char {
 					} else if ((canAttack(curr) && !canAttack(closest))
 							|| (currDist < closestDist)){
 						closest = curr;
-					} else if ( curr == Dungeon.hero &&
+					} else if ( curr instanceof Hero &&
 							(currDist == closestDist) || (canAttack(curr) && canAttack(closest))){
 						closest = curr;
 					}
 				}
 				//if we were going to target the hero, but an afterimage exists, target that instead
-				if (closest == Dungeon.hero){
+				if (closest instanceof Hero){
 					for (Char ch : enemies){
 						if (ch instanceof Feint.AfterImage){
 							closest = ch;

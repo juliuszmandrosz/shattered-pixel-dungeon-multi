@@ -29,6 +29,7 @@ import com.watabou.noosa.Image;
 import com.watabou.utils.Callback;
 import com.watabou.utils.PointF;
 import com.watabou.utils.Random;
+import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 
 import java.util.Arrays;
 import java.util.List;
@@ -80,7 +81,7 @@ public class Lightning extends Group {
 			
 			killAndErase();
 			if (callback != null) {
-				callback.call();
+				Actor.simulate( callback );
 			}
 			
 		} else {

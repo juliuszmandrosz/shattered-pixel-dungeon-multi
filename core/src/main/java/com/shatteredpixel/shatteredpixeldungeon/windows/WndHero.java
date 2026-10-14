@@ -152,7 +152,7 @@ public class WndHero extends WndTabbed {
 			}
 			clear();
 			
-			Hero hero = Dungeon.hero;
+			Hero hero = Dungeon.localHero();
 
 			IconTitle title = new IconTitle();
 			title.icon( HeroSprite.avatar(hero) );
@@ -300,7 +300,7 @@ public class WndHero extends WndTabbed {
 		
 		private void setupList() {
 			Component content = buffList.content();
-			for (Buff buff : Dungeon.hero.buffs()) {
+			for (Buff buff : Dungeon.localHero().buffs()) {
 				if (buff.icon() != BuffIndicator.NONE) {
 					BuffSlot slot = new BuffSlot(buff);
 					slot.setRect(0, pos, WIDTH, slot.icon.height());

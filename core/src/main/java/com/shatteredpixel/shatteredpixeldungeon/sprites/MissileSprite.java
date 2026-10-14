@@ -44,6 +44,7 @@ import com.watabou.noosa.tweeners.PosTweener;
 import com.watabou.noosa.tweeners.Tweener;
 import com.watabou.utils.Callback;
 import com.watabou.utils.PointF;
+import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 
 import java.util.HashMap;
 
@@ -181,7 +182,7 @@ public class MissileSprite extends ItemSprite implements Tweener.Listener {
 	public void onComplete( Tweener tweener ) {
 		kill();
 		if (callback != null) {
-			callback.call();
+			Actor.simulate( callback );
 		}
 	}
 }

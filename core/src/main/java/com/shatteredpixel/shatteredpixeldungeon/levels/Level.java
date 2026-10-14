@@ -119,7 +119,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 
 public abstract class Level implements Bundlable {
 	
@@ -304,9 +306,9 @@ public abstract class Level implements Bundlable {
 
 			transitions = new ArrayList<>();
 
-			mobs = new HashSet<>();
+			mobs = new LinkedHashSet<>();
 			heaps = new SparseArray<>();
-			blobs = new HashMap<>();
+			blobs = new LinkedHashMap<>();
 			plants = new SparseArray<>();
 			traps = new SparseArray<>();
 			customTiles = new ArrayList<>();
@@ -378,9 +380,9 @@ public abstract class Level implements Bundlable {
 
 		setSize( bundle.getInt(WIDTH), bundle.getInt(HEIGHT));
 		
-		mobs = new HashSet<>();
+		mobs = new LinkedHashSet<>();
 		heaps = new SparseArray<>();
-		blobs = new HashMap<>();
+		blobs = new LinkedHashMap<>();
 		plants = new SparseArray<>();
 		traps = new SparseArray<>();
 		customTiles = new ArrayList<>();
@@ -1555,6 +1557,23 @@ public abstract class Level implements Bundlable {
 
 	//usually just if the base terrain of a cell is solid, but other cases exist too
 	//only check on base terrain, we want to ignore temporary changes from blobs (e.g. light wall)
+	/** A passable cell near "around" that no character occupies yet, for placing party members. */
+	public int pickPartyCell( int around ){
+		for (int ring = 1; ring < 6; ring++) {
+			for (int cell = 0; cell < length(); cell++) {
+				if (distance( cell, around ) != ring) continue;
+				if (!passable[cell] || solid[cell] || invalidHeroPos( cell )) continue;
+				if (com.shatteredpixel.shatteredpixeldungeon.actors.Actor.findChar( cell ) != null) continue;
+				boolean taken = false;
+				for (com.shatteredpixel.shatteredpixeldungeon.actors.hero.Hero h : Dungeon.heroes) {
+					if (h.pos == cell) taken = true;
+				}
+				if (!taken) return cell;
+			}
+		}
+		return around;
+	}
+
 	public boolean invalidHeroPos( int tile ){
 		int flags = Terrain.flags[map[tile]];
 		return (flags & Terrain.PASSABLE) != 0 && (flags & Terrain.AVOID) != 0;

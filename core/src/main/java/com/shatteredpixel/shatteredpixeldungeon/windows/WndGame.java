@@ -101,6 +101,11 @@ public class WndGame extends Window {
 		addButton(curBtn = new RedButton(Messages.get(this, "menu")) {
 			@Override
 			protected void onClick() {
+				if (com.shatteredpixel.shatteredpixeldungeon.coop.Coop.transport != null) {
+					//co-op room on the web: the lobby page owns navigation, the run is replayed from the log
+					com.shatteredpixel.shatteredpixeldungeon.coop.Coop.leave();
+					return;
+				}
 				try {
 					Dungeon.saveAll();
 				} catch (IOException e) {

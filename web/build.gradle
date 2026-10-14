@@ -1,0 +1,54 @@
+import org.teavm.gradle.api.OptimizationLevel
+
+plugins {
+    id 'java-library'
+    id 'com.github.xpenatan.gdx-teavm' version '1.6.2'
+}
+
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+// gdx-teavm 1.6.x artifacts are built for JVM 17+, the game modules stay on appJavaCompatibility
+java.sourceCompatibility = java.targetCompatibility = JavaVersion.VERSION_17
+
+ext.appMainClass = "com.shatteredpixel.shatteredpixeldungeon.web.WebLauncher"
+
+dependencies {
+    implementation project(":core")
+    implementation "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"
+    implementation "com.badlogicgames.gdx-controllers:gdx-controllers-core:$gdxControllersVersion"
+    implementation project(':services:updates:debugUpdates')
+    implementation project(':services:news:debugNews')
+
+    // backend-web is added automatically by the plugin for the js {} target
+    implementation "com.github.xpenatan.gdx-teavm:gdx-freetype-web:$gdxTeavmVersion"
+    implementation "com.github.xpenatan.gdx-teavm:gdx-controllers-web:$gdxTeavmVersion"
+}
+
+gdxTeaVM {
+    assets(new File(project(':core').projectDir, 'src/main/assets'),
+           new File(project(':desktop').projectDir, 'src/main/assets'))
+
+    // Bundle (save files) resolves game classes by name, so the whole game tree must be reflectable.
+    reflection('com.shatteredpixel.shatteredpixeldungeon**')
+    reflection('com.watabou**')
+
+    webDefaults {
+        mainClass.set(appMainClass)
+        // inserted verbatim into index.html as main(<args>), so it must be a JS array literal
+        mainClassArgs.set("[\"${appVersionName}\", \"${appVersionCode}\"]".toString())
+        htmlTitle.set(appName)
+        htmlWidth.set(0)
+        htmlHeight.set(0)
+        // production settings: minified output (2-3x smaller per TeaVM docs), full global analysis
+        obfuscated.set(true)
+        optimization.set(OptimizationLevel.BALANCED)
+    }
+
+    js {
+        targetFileName.set('app.js')
+        serverPort.set(8080)
+        // the whole game is ~230k lines of Java, TeaVM needs a bigger heap than Gradle's default
+        outOfProcess.set(true)
+        processMemory.set(12288)
+        fastGlobalAnalysis.set(true)
+    }
+}

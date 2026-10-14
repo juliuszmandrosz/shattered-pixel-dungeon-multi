@@ -233,6 +233,9 @@ public class SPDSettings extends GameSettings {
 	}
 	
 	public static boolean intro() {
+		//co-op: the tutorial state is this client's and it changes the simulation (no hunger,
+		//no accidental door discovery, hidden entrance doors), so a shared game is never the tutorial
+		if (com.shatteredpixel.shatteredpixeldungeon.coop.Coop.enabled) return false;
 		return getBoolean( KEY_INTRO, true );
 	}
 	

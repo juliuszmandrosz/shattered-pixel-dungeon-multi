@@ -309,7 +309,7 @@ public class MagicMissile extends Emitter {
 			y += sy * d;
 			if ((time -= d) <= 0) {
 				on = false;
-				if (callback != null ) callback.call();
+				if (callback != null ) Actor.simulate( callback );
 			}
 		}
 	}

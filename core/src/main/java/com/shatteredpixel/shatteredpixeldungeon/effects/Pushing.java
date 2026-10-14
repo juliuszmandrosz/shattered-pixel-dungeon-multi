@@ -135,7 +135,7 @@ public class Pushing extends Actor {
 				
 				killAndErase();
 				Actor.remove(Pushing.this);
-				if (callback != null) callback.call();
+				if (callback != null) Actor.simulate( callback );
 				GameScene.sortMobSprites();
 
 				next();

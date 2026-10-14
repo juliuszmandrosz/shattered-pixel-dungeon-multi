@@ -68,7 +68,11 @@ public class TextInput extends Component {
 		viewport.setCamera(new OrthographicCamera());
 		//TODO this is needed for the moment as Spritebatch switched to using VAOs in libGDX v1.13.1
 		//  This results in HARD crashes atm, whereas old vertex arrays work fine
-		SpriteBatch.overrideVertexType = Mesh.VertexDataType.VertexArray;
+		//WebGL has no client-side vertex arrays (the stage would render nothing and leave GL in a
+		//broken state), a plain vertex buffer object works on both WebGL 1 and 2
+		SpriteBatch.overrideVertexType = DeviceCompat.isWeb()
+				? Mesh.VertexDataType.VertexBufferObject
+				: Mesh.VertexDataType.VertexArray;
 		stage = new Stage(viewport);
 		Game.inputHandler.addInputProcessor(stage);
 
