@@ -97,18 +97,21 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
       // a reserved seq may already be taken (a client that waited on a gap fills it with a
       // "void" entry, see below) and the write is then refused: take a fresh seq and retry, so
       // an order is never lost silently
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const result = await runTransaction(ref(db, `rooms/${roomId}/nextSeq`), (n: number | null) => (n ?? 0) + 1);
-        const seq = result.snapshot.val() as number;
-        const action: GameAction = { uid: user!.uid, seq, type, payload: payload ?? null, at: Date.now() };
+      // the transaction itself may be refused as well: with two clients numbering at once the
+      // first attempt is made against a stale cache, and the rules reject it before the retry
+      for (let attempt = 0; attempt < 6; attempt++) {
+        let seq = 0;
         try {
+          const result = await runTransaction(ref(db, `rooms/${roomId}/nextSeq`), (n: number | null) => (n ?? 0) + 1);
+          seq = result.snapshot.val() as number;
+          const action: GameAction = { uid: user!.uid, seq, type, payload: payload ?? null, at: Date.now() };
           await set(ref(db, `actions/${roomId}/${actionKey(seq)}`), action);
           return;
         } catch (err) {
           console.warn(`action ${type} seq ${seq} refused (attempt ${attempt + 1})`, err);
         }
       }
-      console.error(`action ${type} dropped after 4 attempts`);
+      console.error(`action ${type} dropped after 6 attempts`);
     },
     [roomId, user],
   );
@@ -133,6 +136,7 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
                   danger: Boolean(data.danger),
                   waiting: Boolean(data.waiting),
                   states: Array.isArray(data.states) ? data.states.map(String) : [],
+                  epochs: Array.isArray(data.epochs) ? data.epochs.map(Number) : [],
                 }
               : null,
           );
@@ -157,36 +161,45 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
   );
   // turn policy: the game consumes one log entry per hero step, so somebody has to write
   // "nothing new" (skip hero:epoch) whenever a hero is busy walking or resting, and for an idle
-  // hero while others move and no enemy is in sight (it lets the turn pass). The owner writes it
-  // at once; the other clients after a short delay, in case the owner is absent (duplicates are
-  // dropped by the game, the epoch no longer matches). A strict turn (idle hero, enemy in sight)
-  // is only skipped after a long timeout, or by the countdown button.
+  // hero while others move and no enemy is in sight (it lets the turn pass). Each client writes
+  // its own hero's entry as soon as any turn message shows it will be needed (the entry is then
+  // in the log before the game asks, so a round costs animation time, not a round trip); the
+  // other clients write it for the announced hero after a short delay, in case its owner is
+  // absent (duplicates are dropped by the game, the epoch no longer matches). A strict turn
+  // (idle hero, enemy in sight) is only skipped after a long timeout, or by the countdown button.
   useEffect(() => {
     if (!turn || !gameReady || !user) return;
+    const busy = (s: string | undefined) => s === "walk" || s === "rest";
+    const myIndex = order.indexOf(user.uid);
+    const write = (hero: number, epoch: number) => {
+      const key = `${hero}:${epoch}`;
+      if (sentSkip.current === key) return;
+      sentSkip.current = key;
+      void sendAction("skip", key);
+    };
+    // own hero: tick while busy; pass while idle, others move and no enemy is in sight
+    const othersBusy = (hero: number) => turn.states.some((s, i) => i !== hero && busy(s));
+    const myEpoch = turn.epochs[myIndex] ?? (turn.hero === myIndex ? turn.epoch : null);
+    if (myIndex >= 0 && myEpoch !== null && (busy(turn.states[myIndex]) || (!turn.danger && othersBusy(myIndex)))) {
+      write(myIndex, myEpoch);
+    }
+    // the announced hero, when it is somebody else's: cover an absent owner, time a strict turn
     const key = `${turn.hero}:${turn.epoch}`;
     if (turnStart.current?.key !== key) turnStart.current = { key, at: Date.now() };
     const started = turnStart.current.at;
-    const myIndex = order.indexOf(user.uid);
-    const mine = turn.hero === myIndex;
-    const busy = turn.states[turn.hero] === "walk" || turn.states[turn.hero] === "rest";
-    const othersBusy = turn.states.some((s, i) => i !== turn.hero && (s === "walk" || s === "rest"));
-    const strict = !busy && turn.danger;
+    const strict = !busy(turn.states[turn.hero]) && turn.danger;
     let delay: number | null = null;
-    if (!strict && (busy || othersBusy)) {
-      delay = mine ? 0 : AFK_MS + AFK_STAGGER_MS * ((myIndex - turn.hero + order.length) % order.length);
-    } else if (strict && !mine) {
-      delay = SKIP_SECONDS_DANGER * 1000;
+    if (turn.hero !== myIndex) {
+      if (!strict && (busy(turn.states[turn.hero]) || othersBusy(turn.hero))) {
+        delay = AFK_MS + AFK_STAGGER_MS * ((myIndex - turn.hero + order.length) % order.length);
+      } else if (strict) {
+        delay = SKIP_SECONDS_DANGER * 1000;
+      }
     }
     let timer: ReturnType<typeof setTimeout> | null = null;
     if (delay !== null) {
-      timer = setTimeout(
-        () => {
-          if (sentSkip.current === key) return;
-          sentSkip.current = key;
-          void sendAction("skip", key);
-        },
-        Math.max(0, delay - (Date.now() - started)),
-      );
+      const hero = turn.hero, epoch = turn.epoch;
+      timer = setTimeout(() => write(hero, epoch), Math.max(0, delay - (Date.now() - started)));
     }
     setWaited(Math.floor((Date.now() - started) / 1000));
     const ticker = strict ? setInterval(() => setWaited(Math.floor((Date.now() - started) / 1000)), 500) : null;
@@ -253,7 +266,7 @@ export function PlayClient({ params }: { params: Promise<{ id: string }> }) {
   );
 }
 
-type Turn = { hero: number; epoch: number; danger: boolean; waiting: boolean; states: string[] };
+type Turn = { hero: number; epoch: number; danger: boolean; waiting: boolean; states: string[]; epochs: number[] };
 
 const ROW = 44;
 // seconds a player may keep everyone waiting on a strict turn (enemy in sight) before the

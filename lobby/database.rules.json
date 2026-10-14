@@ -7,7 +7,7 @@
       "$roomId": {
         ".write": false,
         "nextSeq": {
-          ".write": "auth != null && root.child('roomPlayers').child($roomId).child(auth.uid).exists() && root.child('rooms').child($roomId).child('status').val() == 'playing' && newData.isNumber() && ((!data.exists() && newData.val() == 1) || newData.val() == data.val() + 1)"
+          ".write": "auth != null && root.child('roomPlayers').child($roomId).child(auth.uid).exists() && root.child('rooms').child($roomId).child('status').val() == 'playing' && newData.isNumber() && newData.val() >= 1"
         }
       }
     },

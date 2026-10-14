@@ -138,17 +138,20 @@ public class Coop {
 	/**
 	 * Tells the hosting page where the simulation stands, for the turn HUD and for the skip
 	 * entries it writes: the hero whose act() is next, its epoch, whether an enemy is in sight,
-	 * whether the simulation is parked on that hero right now, and every hero's state.
+	 * whether the simulation is parked on that hero right now, every hero's state and epoch.
 	 */
 	public static void announce( Hero hero, boolean waiting ){
 		if (!enabled || transport == null) return;
 		StringBuilder states = new StringBuilder();
+		StringBuilder epochList = new StringBuilder();
 		for (Hero h : Dungeon.heroes) {
-			if (states.length() > 0) states.append( ',' );
+			if (states.length() > 0) { states.append( ',' ); epochList.append( ',' ); }
 			states.append( '"' ).append( !h.isAlive() ? "dead" : h.resting ? "rest" : h.isBusy() ? "walk" : "idle" ).append( '"' );
+			epochList.append( epoch( h ) );
 		}
 		String msg = "{\"spd\":\"turn\",\"hero\":" + indexOf( hero ) + ",\"epoch\":" + epoch( hero )
-				+ ",\"danger\":" + partySeesEnemy() + ",\"waiting\":" + waiting + ",\"states\":[" + states + "]}";
+				+ ",\"danger\":" + partySeesEnemy() + ",\"waiting\":" + waiting + ",\"states\":[" + states
+				+ "],\"epochs\":[" + epochList + "]}";
 		if (msg.equals( announced )) return;
 		announced = msg;
 		transport.send( msg );

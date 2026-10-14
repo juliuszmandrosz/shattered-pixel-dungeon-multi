@@ -70,22 +70,22 @@
   function policy(uid, t) {
     if (timers[uid]) { clearTimeout(timers[uid]); timers[uid] = null; }
     if (absent.includes(uid)) return;
+    const busy = (s) => s === "walk" || s === "rest";
+    const myIndex = ids.indexOf(uid);
+    const write = (hero, epoch) => { const key = hero + ":" + epoch; if (sent[uid] === key) return; sent[uid] = key; relay(uid, "skip", key); };
+    const othersBusy = (hero) => t.states.some((s, i) => i !== hero && busy(s));
+    const myEpoch = t.epochs ? t.epochs[myIndex] : null;
+    if (myEpoch !== null && (busy(t.states[myIndex]) || (!t.danger && othersBusy(myIndex)))) write(myIndex, myEpoch);
     const key = t.hero + ":" + t.epoch;
     if (!starts[uid] || starts[uid].key !== key) starts[uid] = { key, at: Date.now() };
-    const myIndex = ids.indexOf(uid);
-    const mine = t.hero === myIndex;
-    const busy = t.states[t.hero] === "walk" || t.states[t.hero] === "rest";
-    const othersBusy = t.states.some((s, i) => i !== t.hero && (s === "walk" || s === "rest"));
-    const strict = !busy && t.danger;
+    const strict = !busy(t.states[t.hero]) && t.danger;
     let delay = null;
-    if (!strict && (busy || othersBusy)) delay = mine ? 0 : AFK_MS + AFK_STAGGER_MS * ((myIndex - t.hero + ids.length) % ids.length);
-    else if (strict && !mine) delay = SKIP_SECONDS_DANGER * 1000;
+    if (t.hero !== myIndex) {
+      if (!strict && (busy(t.states[t.hero]) || othersBusy(t.hero))) delay = AFK_MS + AFK_STAGGER_MS * ((myIndex - t.hero + ids.length) % ids.length);
+      else if (strict) delay = SKIP_SECONDS_DANGER * 1000;
+    }
     if (delay === null) return;
-    timers[uid] = setTimeout(() => {
-      if (sent[uid] === key) return;
-      sent[uid] = key;
-      relay(uid, "skip", key);
-    }, Math.max(0, delay - (Date.now() - starts[uid].at)));
+    timers[uid] = setTimeout(() => write(t.hero, t.epoch), Math.max(0, delay - (Date.now() - starts[uid].at)));
   }
   window.addEventListener("message", (e) => {
     const d = e.data;
