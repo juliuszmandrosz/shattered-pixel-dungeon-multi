@@ -50,12 +50,15 @@ public class HeroSprite extends CharSprite {
 	private Animation read;
 
 	public HeroSprite() {
+		this( Dungeon.hero );
+	}
+
+	public HeroSprite( Hero hero ) {
 		super();
 		
-		texture( Dungeon.hero.heroClass.spritesheet() );
+		texture( hero.heroClass.spritesheet() );
+		link( hero );
 		updateArmor();
-		
-		link( Dungeon.hero );
 
 		if (ch.isAlive())
 			idle();
@@ -70,7 +73,7 @@ public class HeroSprite extends CharSprite {
 	
 	public void updateArmor() {
 
-		TextureFilm film = new TextureFilm( tiers(), Dungeon.hero.tier(), FRAME_WIDTH, FRAME_HEIGHT );
+		TextureFilm film = new TextureFilm( tiers(), ((Hero)ch).tier(), FRAME_WIDTH, FRAME_HEIGHT );
 		
 		idle = new Animation( 1, true );
 		idle.frames( film, 0, 0, 0, 1, 0, 0, 1, 1 );
@@ -95,16 +98,22 @@ public class HeroSprite extends CharSprite {
 		read = new Animation( 20, false );
 		read.frames( film, 19, 20, 20, 20, 20, 20, 20, 20, 20, 19 );
 		
-		if (Dungeon.hero.isAlive())
+		if (ch.isAlive())
 			idle();
 		else
 			die();
 	}
 	
+	//co-op: the camera follows the player's own hero only; following every hero that moves
+	//would scroll the map under the cursor while another player acts
+	private boolean followed(){
+		return ch == null || ch == Dungeon.localHero();
+	}
+
 	@Override
 	public void place( int p ) {
 		super.place( p );
-		if (Game.scene() instanceof GameScene) Camera.main.panFollow(this, 5f);
+		if (Game.scene() instanceof GameScene && followed()) Camera.main.panFollow(this, 5f);
 	}
 
 	@Override
@@ -113,7 +122,7 @@ public class HeroSprite extends CharSprite {
 		if (ch != null && ch.flying) {
 			play( fly );
 		}
-		Camera.main.panFollow(this, 20f);
+		if (followed()) Camera.main.panFollow(this, 20f);
 	}
 
 	@Override
@@ -128,7 +137,7 @@ public class HeroSprite extends CharSprite {
 	public void jump( int from, int to, float height, float duration,  Callback callback ) {
 		super.jump( from, to, height, duration, callback );
 		play( fly );
-		Camera.main.panFollow(this, 20f);
+		if (followed()) Camera.main.panFollow(this, 20f);
 	}
 
 	public synchronized void read() {

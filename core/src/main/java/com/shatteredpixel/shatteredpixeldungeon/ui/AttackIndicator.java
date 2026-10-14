@@ -22,6 +22,7 @@
 package com.shatteredpixel.shatteredpixeldungeon.ui;
 
 import com.shatteredpixel.shatteredpixeldungeon.Dungeon;
+import com.shatteredpixel.shatteredpixeldungeon.coop.Coop;
 import com.shatteredpixel.shatteredpixeldungeon.SPDAction;
 import com.shatteredpixel.shatteredpixeldungeon.actors.Char;
 import com.shatteredpixel.shatteredpixeldungeon.actors.mobs.Mob;
@@ -100,9 +101,9 @@ public class AttackIndicator extends Tag {
 			active = true;
 			if (bg.width > 0 && sprite != null)sprite.visible = true;
 
-			if (Dungeon.hero.isAlive()) {
+			if (Dungeon.localHero().isAlive()) {
 
-				enable(Dungeon.hero.ready);
+				enable(Dungeon.localHero().ready);
 
 			} else {
 				visible( false );
@@ -114,10 +115,10 @@ public class AttackIndicator extends Tag {
 	private synchronized void checkEnemies() {
 
 		candidates.clear();
-		int v = Dungeon.hero.visibleEnemies();
+		int v = Dungeon.localHero().visibleEnemies();
 		for (int i=0; i < v; i++) {
-			Mob mob = Dungeon.hero.visibleEnemy( i );
-			if ( Dungeon.hero.canAttack( mob) ) {
+			Mob mob = Dungeon.localHero().visibleEnemy( i );
+			if ( Dungeon.localHero().canAttack( mob) ) {
 				candidates.add( mob );
 			}
 		}
@@ -127,7 +128,9 @@ public class AttackIndicator extends Tag {
 				lastTarget = null;
 			} else {
 				active = true;
-				lastTarget = Random.element( candidates );
+				//co-op: this runs on the actor thread (Hero.ready) and must not touch the
+				//simulation generator, the candidates also differ per client. First one it is.
+				lastTarget = candidates.get( 0 );
 				updateImage();
 				flash();
 			}
@@ -180,10 +183,8 @@ public class AttackIndicator extends Tag {
 	@Override
 	protected void onClick() {
 		super.onClick();
-		if (enabled && Dungeon.hero.ready) {
-			if (Dungeon.hero.handle( lastTarget.pos )) {
-				Dungeon.hero.next();
-			}
+		if (enabled && Dungeon.localHero().ready) {
+			Coop.handleCell( Dungeon.localHero(), lastTarget.pos );
 		}
 	}
 

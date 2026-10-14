@@ -219,7 +219,9 @@ public class FileUtils {
 	}
 	
 	private static void bundleToStream( OutputStream output, Bundle bundle ) throws IOException{
-		Bundle.write( bundle, output );
+		//TeaVM's GZIP implementation fails on flush, so the web build writes uncompressed bundles.
+		// Bundle.read detects the format from the stream header, so both kinds load everywhere.
+		Bundle.write( bundle, output, !DeviceCompat.isWeb() );
 		output.close();
 	}
 

@@ -56,6 +56,7 @@ import com.watabou.noosa.tweeners.Tweener;
 import com.watabou.utils.Callback;
 import com.watabou.utils.PointF;
 import com.watabou.utils.Random;
+import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 
 import java.nio.Buffer;
 import java.util.HashSet;
@@ -819,7 +820,7 @@ public class CharSprite extends MovieClip implements Tweener.Listener, MovieClip
 				GameScene.ripple( ch.pos );
 			}
 			if (jumpCallback != null) {
-				jumpCallback.call();
+				Actor.simulate( jumpCallback );
 			}
 			GameScene.sortMobSprites();
 
@@ -830,10 +831,15 @@ public class CharSprite extends MovieClip implements Tweener.Listener, MovieClip
 
 				motion.killAndErase();
 				motion = null;
-				if (ch != null) ch.onMotionComplete();
+				if (ch != null) Actor.simulate( ch::onMotionComplete );
 
 				GameScene.sortMobSprites();
-				notifyAll();
+				try {
+					notifyAll();
+				} catch (IllegalMonitorStateException e) {
+					//web backend: thread identity is unreliable, the actor thread polls with a timeout anyway
+					System.err.println("coop: sprite notify without monitor");
+				}
 			}
 
 		}
@@ -845,18 +851,18 @@ public class CharSprite extends MovieClip implements Tweener.Listener, MovieClip
 		if (animCallback != null) {
 			Callback executing = animCallback;
 			animCallback = null;
-			executing.call();
+			Actor.simulate( executing );
 		} else {
 			
 			if (anim == attack) {
 				
 				idle();
-				ch.onAttackComplete();
+				Actor.simulate( ch::onAttackComplete );
 				
 			} else if (anim == operate) {
 				
 				idle();
-				ch.onOperateComplete();
+				Actor.simulate( ch::onOperateComplete );
 				
 			}
 			

@@ -27,6 +27,7 @@ import com.watabou.noosa.Group;
 import com.watabou.noosa.Image;
 import com.watabou.utils.Callback;
 import com.watabou.utils.PointF;
+import com.shatteredpixel.shatteredpixeldungeon.actors.Actor;
 
 public class Chains extends Group {
 
@@ -85,7 +86,7 @@ public class Chains extends Group {
 
 			killAndErase();
 			if (callback != null) {
-				callback.call();
+				Actor.simulate( callback );
 			}
 
 		} else {
